@@ -372,6 +372,7 @@
     if(welcomeClosing)return;
     const selected=$('welcome-layout').value;
     if(!Object.hasOwn(LAYOUTS,selected))return;
+    unlockAudio();
     $('layout').value=selected;changeChamber();
     welcomeClosing=true;
     $('welcome').setAttribute('data-closing','true');
@@ -580,7 +581,7 @@
   function unlockAudio() {
     if (!sound) return;
     try {
-      if (!audio) {
+      if (!audio || audio.state==='closed') {
         audio = new (window.AudioContext || window.webkitAudioContext)();
         master = audio.createGain();
         master.gain.value = 0.65;
@@ -592,8 +593,17 @@
         compressor.release.value = 0.18;
         master.connect(compressor);
         compressor.connect(audio.destination);
+        audio.addEventListener?.('statechange',()=>updateSoundControls());
+        // Start a silent source inside the gesture, including Safari's first unlock.
+        const silent=audio.createBufferSource();
+        silent.buffer=audio.createBuffer(1,1,audio.sampleRate);
+        silent.connect(master);silent.onended=()=>silent.disconnect();silent.start();
       }
-      if (audio.state === 'suspended') audio.resume().catch(() => {});
+      if (audio.state==='suspended'||audio.state==='interrupted') {
+        audio.resume().then(()=>updateSoundControls()).catch(()=>{
+          if(sound)updateSoundControls('SOUND: TAP TO ENABLE');
+        });
+      }
     } catch (_) { sound = false; updateSoundControls('SOUND UNAVAILABLE'); }
   }
   function tone(start, end, duration, volume, type = 'sine') {
@@ -785,13 +795,15 @@
   $('slow').addEventListener('click',()=>{slow=!slow;$('slow').setAttribute('aria-pressed',String(slow));});
   $('view').addEventListener('click',()=>{perspective=!perspective;$('view').textContent='VIEW: '+(perspective?'PERSPECTIVE':'SIDE');});
   $('replay').addEventListener('click',()=>{if(frames.length&&(mode==='ready'||mode==='finished'))startReplay(frames);});
-  function updateSoundControls(label=sound?'SOUND ON':'SOUND OFF') {
+  function updateSoundControls(label=!sound?'SOUND OFF':audio&&audio.state!=='running'?'SOUND: TAP TO ENABLE':'SOUND ON') {
     for(const id of ['sound','stage-sound']) {
       $(id).textContent=label;$(id).setAttribute('aria-pressed',String(sound));
     }
   }
   function toggleSound() {
-    sound=!sound;updateSoundControls();
+    const needsResume=sound&&audio&&audio.state!=='running';
+    if(!needsResume)sound=!sound;
+    updateSoundControls();
     if(sound)unlockAudio();
     if(master)master.gain.value=sound?.65:0;
     tone(600,900,.1,.04);
@@ -838,6 +850,8 @@
   }
   canvas.addEventListener('pointermove', updateMouseAim);
   function releaseMouseAim(event) {
+    // Touch release is an activation gesture on Safari, unlike some pointer-down events.
+    if(sound&&audio&&audio.state!=='running')unlockAudio();
     if (!drag || event.pointerId !== drag.id) return;
     // Release may carry a newer position than the last pointermove event.
     updateMouseAim(event);

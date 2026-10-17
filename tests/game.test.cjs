@@ -349,6 +349,14 @@ test('audio-enabled falls synthesize varied impact layers, mute, and replay', ()
   assert.ok(audio.buffers>1,'Impacts should use multiple textures');
   assert.ok(audio.filters.some(filter=>filter.type==='lowpass'));
   assert.ok(audio.filters.some(filter=>filter.type==='highpass'));
+  for(const state of ['suspended','interrupted']) {
+    let resumes=0;audio.state=state;
+    audio.resume=()=>{resumes++;audio.state='running';return Promise.resolve();};
+    game.click('stage-sound');
+    assert.equal(resumes,1,'Clicking sound resumes paused Safari audio instead of muting it');
+    assert.equal(game.element('stage-sound')['aria-pressed'],'true');
+  }
+
   game.click('sound');
   const before=audio.voices;
   game.click('replay');game.advance(20);
