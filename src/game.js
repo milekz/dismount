@@ -79,6 +79,12 @@
       target.scale=Math.min((width-45)/(reference.end+188),(height-185)/(reference.floor+81));
       target.x=width*.42-p.x*target.scale;target.y=height*.48-p.y*target.scale;
     }
+    if(width<600||height<420) {
+      const p=current.points[2];
+      target.scale=Math.min((width-40)/540,Math.max(100,height-150)/250);
+      target.x=width*.38-p.x*target.scale;
+      target.y=height*.48-p.y*target.scale;
+    }
     if(!camera||mode==='ready'||mode==='charging'||mode==='aiming')camera={...target};
     const blend=1-Math.exp(-renderDelta*5);
     for(const key of ['scale','x','y'])camera[key]+=(target[key]-camera[key])*blend;
@@ -731,12 +737,12 @@
     if ($('launch').hasPointerCapture(id)) $('launch').releasePointerCapture(id);
   }
   $('launch').addEventListener('pointerdown', event => {
-    if (event.button !== 0 || launchPress || (mode !== 'ready' && mode !== 'charging')) return;
+    if (event.button !== 0 || event.isPrimary===false || launchPress || (mode !== 'ready' && mode !== 'charging')) return;
     event.preventDefault();
     suppressLaunchClick = false;
     const alreadyCharging = mode === 'charging';
     launchPress = { id: event.pointerId, started: event.timeStamp, alreadyCharging };
-    $('launch').setPointerCapture(event.pointerId);
+    try { $('launch').setPointerCapture(event.pointerId); } catch (_) { /* Global release fallback. */ }
     if (!alreadyCharging) launch();
   });
   function releaseLaunchButton(event) {
@@ -763,22 +769,66 @@
     if (suppress && event.detail !== 0) return;
     launch();
   });
+  let expandedView=false, fullscreenPending=false, expandedRestore=null;
+  const nativeFullscreenElement=()=>document.fullscreenElement||document.webkitFullscreenElement;
   function updateFullscreenButton() {
-    const active=document.fullscreenElement===$('game-panel');
+    const active=expandedView||nativeFullscreenElement()===$('game-panel');
     $('fullscreen').textContent=active?'EXIT FULLSCREEN':'FULLSCREEN';
     $('fullscreen').setAttribute('aria-pressed',String(active));
+    $('fullscreen').disabled=fullscreenPending;
   }
-  $('fullscreen').disabled=typeof $('game-panel').requestFullscreen!=='function';
-  if($('fullscreen').disabled)$('fullscreen').title='Fullscreen is unavailable in this browser.';
+  function setExpandedView(active) {
+    if(expandedView===active)return;
+    expandedView=active;
+    $('game-panel').setAttribute('data-expanded',String(active));
+    if(active) {
+      const body=document.body;
+      expandedRestore={x:window.scrollX||0,y:window.scrollY||0,
+        style:{position:body.style.position,top:body.style.top,width:body.style.width,overflow:body.style.overflow},
+        siblings:Array.from(document.querySelectorAll('header, .workspace > aside, .workspace > .injury-report, .highscores, main > footer')).map(node=>[node,node.inert])};
+      body.style.position='fixed';body.style.top=-expandedRestore.y+'px';body.style.width='100%';body.style.overflow='hidden';
+      for(const [node] of expandedRestore.siblings)node.inert=true;
+    } else {
+      Object.assign(document.body.style,expandedRestore.style);
+      for(const [node,inert] of expandedRestore.siblings)node.inert=inert;
+      window.scrollTo?.(expandedRestore.x,expandedRestore.y);expandedRestore=null;
+    }
+    updateFullscreenButton();camera=null;resize();$('fullscreen').focus?.();
+  }
+  $('fullscreen').disabled=false;
   $('fullscreen').addEventListener('click',async()=>{
+    if(fullscreenPending)return;
+    if(expandedView){setExpandedView(false);return;}
+    fullscreenPending=true;updateFullscreenButton();
+    const panel=$('game-panel'),active=nativeFullscreenElement()===panel;
     try {
-      if(document.fullscreenElement===$('game-panel'))await document.exitFullscreen();
-      else await $('game-panel').requestFullscreen();
-      $('fullscreen').title='';
-    } catch (_) { $('fullscreen').title='Fullscreen could not open. Try again or check browser permissions.'; }
-    updateFullscreenButton();
+      if(active) {
+        const leave=document.exitFullscreen||document.webkitExitFullscreen;
+        if(leave)await leave.call(document);
+      } else {
+        const enter=panel.requestFullscreen||panel.webkitRequestFullscreen;
+        if(!enter||document.fullscreenEnabled===false) setExpandedView(true);
+        else await enter.call(panel);
+      }
+      $('fullscreen').title=expandedView?'Full-window view; browser controls may remain visible.':'';
+    } catch (_) {
+      if(!active) {
+        setExpandedView(true);
+        $('fullscreen').title='Full-window view; browser controls may remain visible.';
+      } else $('fullscreen').title='Use the browser fullscreen exit control to leave.';
+    } finally { fullscreenPending=false;updateFullscreenButton();camera=null;resize(); }
   });
-  document.addEventListener('fullscreenchange',()=>{updateFullscreenButton();camera=null;resize();});
+  const fullscreenChanged=()=>{updateFullscreenButton();camera=null;resize();};
+  document.addEventListener('fullscreenchange',fullscreenChanged);
+  document.addEventListener('webkitfullscreenchange',fullscreenChanged);
+  document.addEventListener('keydown',event=>{
+    if(event.key==='Escape'&&expandedView){event.preventDefault();setExpandedView(false);}
+  });
+  window.addEventListener('resize',()=>{
+    if(drag||launchPress)reset();
+    camera=null;resize();
+  });
+  window.visualViewport?.addEventListener('resize',()=>{camera=null;resize();});
   $('stage-reset').addEventListener('click',reset);
   $('reset').addEventListener('click',reset);$('again').addEventListener('click',reset);
   $('stage').addEventListener('click', event => {
@@ -812,7 +862,7 @@
   $('stage-sound').addEventListener('click',toggleSound);
   document.addEventListener('keydown',event=>{if($('welcome').open)return;if(event.repeat||event.ctrlKey||event.metaKey||event.altKey)return;if(['INPUT','SELECT','BUTTON'].includes(event.target.tagName))return;if(event.code==='Space'){event.preventDefault();launch();}if(event.code==='KeyR')reset();});
   canvas.addEventListener('pointerdown', event => {
-    if (mode !== 'ready' || event.button !== 0 || drag) return;
+    if (mode !== 'ready' || event.button !== 0 || event.isPrimary===false || drag) return;
     const rect = canvas.getBoundingClientRect();
     const x = (event.clientX - rect.left - offsetX) / scale;
     const y = (event.clientY - rect.top - offsetY) / scale;
@@ -823,7 +873,8 @@
     event.preventDefault();
     $('retry-settings').hidden=true;unlockAudio(); tone(520, 700, 0.07, 0.035);
     if (hitBody) $('part').value = nearest.name;
-    drag = { id: event.pointerId, x: event.clientX, y: event.clientY, distance: 0, held: 0, moved: false };
+    drag = { id: event.pointerId, x: event.clientX, y: event.clientY, distance: 0, held: 0, moved: false,
+      powerDistance:event.pointerType==='touch'?Math.min(180,Math.max(90,width*.4)):180 };
     meterTime = 0;
     power = 0;
     $('power-fill').style.width = '0%';
@@ -843,7 +894,7 @@
     if (drag.distance >= 10) drag.moved = true;
     if (!drag.moved) return;
     const angle = Math.round(Math.max(-100, Math.min(100, Math.atan2(dy, dx) * 180 / Math.PI)));
-    power = Math.min(1, drag.distance / 180);
+    power = Math.min(1, drag.distance / drag.powerDistance);
     $('angle').value = String(angle); $('angle-value').textContent = angle + '°';
     $('power-fill').style.width = power * 100 + '%';
     $('power-value').textContent = Math.round(power * 100) + '%';
@@ -861,7 +912,7 @@
   }
   canvas.addEventListener('pointerup', releaseMouseAim);
   // Capture phase receives releases over UI overlays and outside the canvas too.
-  window.addEventListener('pointerup', releaseMouseAim, true);
+  window.addEventListener('pointerup',event=>{releaseLaunchButton(event);releaseMouseAim(event);},true);
   window.addEventListener('pointermove', updateMouseAim, true);
   window.addEventListener('mouseup', event => {
     if (drag && event.button === 0) releaseMouseAim({

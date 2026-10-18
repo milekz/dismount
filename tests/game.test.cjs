@@ -29,14 +29,21 @@ function setup(AudioContext, storage, reducedMotion=true, viewport={width:900,he
     return elements.get(id);
   }
   let nextFrame, time = 0;
-  const windowEvents = {};
+  const windowEvents = {}, documentEvents = {};
+  let restoredScroll=null;
   let serial=0;
-  const document = { getElementById: element, createElement: () => element('row-'+serial++), addEventListener() {} };
-  const sandbox = { window: { matchMedia:()=>({matches:reducedMotion}), AudioContext, DismountPhysics: physics, DismountScores: require('../src/scores.js'), addEventListener(type, callback) { windowEvents[type] = callback; } }, document, devicePixelRatio: 1,
+  const document = { body:{style:{position:'',top:'',width:'',overflow:''}},
+    querySelectorAll:()=>[element('page-header'),element('outside-controls')],
+    getElementById: element, createElement: () => element('row-'+serial++),
+    addEventListener(type,handler) {
+      const previous=documentEvents[type];
+      documentEvents[type]=event=>{previous?.(event);handler(event);};
+    } };
+  const sandbox = { window: { scrollX:0,scrollY:120,scrollTo:(x,y)=>{restoredScroll=[x,y];},matchMedia:()=>({matches:reducedMotion}), AudioContext, DismountPhysics: physics, DismountScores: require('../src/scores.js'), addEventListener(type, callback) { windowEvents[type] = callback; } }, document, devicePixelRatio: 1,
     localStorage: storage || { getItem() { throw new Error('Storage disabled'); }, setItem() { throw new Error('Storage disabled'); } },
     ResizeObserver: class { observe() {} }, requestAnimationFrame(callback) { nextFrame = callback; } };
   vm.runInNewContext(fs.readFileSync(require.resolve('../src/game.js'), 'utf8'), sandbox);
-  return { element, windowEvents, camera:()=>translations[0], zoom:()=>scales[0]?.[0], click: id => element(id).events.click(), advance(seconds) {
+  return { element, windowEvents, document, documentEvents, restoredScroll:()=>restoredScroll, camera:()=>translations[0], zoom:()=>scales[0]?.[0], click: id => element(id).events.click(), advance(seconds) {
     for (let frame = 0; frame < seconds * 60; frame++) { time += 1000 / 60; if (AudioContext?.instance) AudioContext.instance.currentTime = time/1000; nextFrame(time); }
   } };
 }
@@ -670,4 +677,50 @@ test('run statistics follow replay seeking and reset',()=>{
   game.element('replay-timeline').value=game.element('replay-timeline').max;
   game.element('replay-timeline').events.input();assert.deepEqual(read(),completed);
   game.click('reset');assert.deepEqual(read(),initial);
+});
+
+test('fullscreen falls back to a full-window view and restores scrolling and focus access',async()=>{
+  const game=setup();
+  assert.equal(game.element('fullscreen').disabled,false);
+  await game.click('fullscreen');
+  assert.equal(game.element('game-panel')['data-expanded'],'true');
+  assert.equal(game.document.body.style.position,'fixed');
+  assert.equal(game.element('page-header').inert,true);
+  assert.equal(game.element('fullscreen').textContent,'EXIT FULLSCREEN');
+  game.documentEvents.keydown({key:'Escape',target:{tagName:'BUTTON'},preventDefault(){}});
+  assert.equal(game.element('game-panel')['data-expanded'],'false');
+  assert.equal(game.document.body.style.position,'');
+  assert.deepEqual(game.restoredScroll(),[0,120]);
+  assert.equal(game.element('page-header').inert,undefined);
+  assert.equal(game.element('fullscreen')['aria-pressed'],'false');
+  game.element('game-panel').requestFullscreen=()=>Promise.reject(new Error('Denied'));
+  await game.click('fullscreen');assert.equal(game.element('game-panel')['data-expanded'],'true');
+  await game.click('fullscreen');assert.equal(game.element('game-panel')['data-expanded'],'false');
+});
+
+test('native fullscreen toggles and browser exit updates the button',async()=>{
+  const game=setup(),panel=game.element('game-panel');
+  panel.requestFullscreen=async()=>{game.document.fullscreenElement=panel;game.documentEvents.fullscreenchange();};
+  game.document.exitFullscreen=async()=>{game.document.fullscreenElement=null;game.documentEvents.fullscreenchange();};
+  await game.click('fullscreen');assert.equal(game.element('fullscreen')['aria-pressed'],'true');
+  assert.notEqual(panel['data-expanded'],'true');
+  await game.click('fullscreen');assert.equal(game.element('fullscreen')['aria-pressed'],'false');
+  await game.click('fullscreen');await game.document.exitFullscreen();
+  assert.equal(game.element('fullscreen').textContent,'FULLSCREEN');
+});
+
+test('touch aiming reaches full power on a narrow stage and ignores secondary fingers',()=>{
+  const game=setup(undefined,undefined,true,{width:320,height:460});game.advance(.1);
+  const canvas=game.element('game');
+  const finger={button:0,pointerType:'touch',pointerId:1,isPrimary:true,clientX:10,clientY:300,preventDefault(){}};
+  canvas.events.pointerdown({...finger,isPrimary:false});
+  assert.equal(game.element('status').textContent,'READY TO DISMOUNT');
+  canvas.events.pointerdown(finger);
+  canvas.events.pointermove({...finger,clientX:138});
+  assert.equal(game.element('power-value').textContent,'100%');
+  game.windowEvents.pointerup({...finger,clientX:138});
+  assert.equal(game.element('launch').disabled,true);
+  game.click('reset');canvas.events.pointerdown(finger);game.windowEvents.resize();
+  assert.equal(game.element('status').textContent,'READY TO DISMOUNT');
+  assert.equal(canvas.capturedPointer,null);
 });

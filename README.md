@@ -118,4 +118,10 @@ Use **INJURY RINGS ON/OFF** below the stage to hide injury circles and dislocati
 
 Run statistics below the stage show steps passed (ledges in The Shaft), distance travelled, maximum speed, and time airborne. Distance and speed use the whole body's center of mass; airborne time counts ticks with no environment contact. Progress counts steps below and behind the center of mass, so skipped steps count too. Statistics follow replay scrubbing and reset with each attempt.
 
-**FULLSCREEN** expands the stage, statistics, and replay controls together. Use **EXIT FULLSCREEN** or Escape to leave. The button is disabled when the browser does not support fullscreen.
+**FULLSCREEN** expands the stage, statistics, and replay controls together. Use **EXIT FULLSCREEN** or Escape to leave. When native fullscreen is unavailable or rejected, the button opens a full-window game view instead; browser address bars may remain visible. Exit with the same button or Escape.
+
+### Mobile play
+
+The stage adapts to portrait and landscape screens, with closer character framing on narrow or short canvases. Swipe the bottom toolbar horizontally to access all options. Touch controls use larger hit areas, and touch aiming reaches full power with a shorter drag on narrow screens. A second finger cannot replace an active push gesture; resizing or rotating cancels an unfinished gesture safely. Scrolling remains available outside the canvas.
+
+Fullscreen includes the stage, statistics and replay controls, respects display cutouts, and preserves the current round. The full-window fallback restores the page position on exit. Native browser fullscreen and real-device layout/audio still require manual browser testing.
