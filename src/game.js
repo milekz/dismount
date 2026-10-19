@@ -5,7 +5,15 @@
   const {ScoreBoard, normalizeNick} = window.DismountScores;
   let storage;
   try { storage = localStorage; } catch (_) {}
-  let layout='classic', board=new ScoreBoard(storage,REPLAY_VERSION,layout);
+  let linkedChamber=null;
+  try {
+    const requested=new URL(window.location.href).searchParams.get('chamber');
+    const selected=/^\d+$/.test(requested)
+      ? document.getElementById('layout').options[Number(requested)-1]?.value
+      : requested;
+    if(Object.hasOwn(LAYOUTS,selected))linkedChamber=selected;
+  } catch (_) { /* Keep the default when URL access is unavailable. */ }
+  let layout=linkedChamber||'classic', board=new ScoreBoard(storage,REPLAY_VERSION,layout);
   const boards=new Map([[layout,board]]), bests=new Map();
   let sim = new Simulation(layout);
   let selectedBody='torso', motion=false, injuryRings=false, injuryLabels=true;
@@ -343,18 +351,25 @@
   function updateChamberNumber() {
     const number=Array.from($('layout').options).findIndex(option=>option.value===layout)+1;
     $('chamber-number').textContent='TEST CHAMBER / '+String(number).padStart(2,'0');
+    $('layout-caption').textContent=layout==='endless'?'ENDLESS STAIRS · 120 s MAX':LAYOUTS[layout].count+(LAYOUTS[layout].kind==='shaft'?' LEDGES · ':' STEPS · ')+LAYOUTS[layout].name.toUpperCase();
+    $('highscores-title').textContent='High scores · '+LAYOUTS[layout].name;
   }
   $('layout').value=layout;
   updateChamberNumber();
+  function updateChamberUrl() {
+    try {
+      const url=new URL(window.location.href);
+      url.searchParams.set('chamber',layout);
+      window.history.replaceState(window.history.state,'',url.href);
+    } catch (_) { /* Selection still works for restricted embeds and local files. */ }
+  }
   function changeChamber() {
     if(!['ready','finished'].includes(mode)||!Object.hasOwn(LAYOUTS,$('layout').value)){$('layout').value=layout;return;}
-    bests.set(layout,best);layout=$('layout').value;updateChamberNumber();sim=new Simulation(layout);frames=[];retryRecipe=null;
+    bests.set(layout,best);layout=$('layout').value;updateChamberNumber();updateChamberUrl();sim=new Simulation(layout);frames=[];retryRecipe=null;
     if(!boards.has(layout))boards.set(layout,new ScoreBoard(storage,REPLAY_VERSION,layout));
     board=boards.get(layout);best=0;
     try{best=Math.max(0,Number(storage.getItem(bestKey()))||0);}catch(_){}
     best=Math.max(best,bests.get(layout)||0,...board.entries.map(e=>e.score));$('best').textContent=best.toLocaleString();
-    $('layout-caption').textContent=layout==='endless'?'ENDLESS STAIRS · 120 s MAX':LAYOUTS[layout].count+(LAYOUTS[layout].kind==='shaft'?' LEDGES · ':' STEPS · ')+LAYOUTS[layout].name.toUpperCase();
-    $('highscores-title').textContent='High scores · '+LAYOUTS[layout].name;
     reset();
   }
   $('layout').addEventListener('change',changeChamber);
@@ -422,6 +437,90 @@
     pendingScore=null;mode='running';lock(true);frames=[sim.snapshot()];sim.push(runPush.part,runPush.angle,runPush.power);accumulator=0;
     $('status').textContent='DISMOUNT IN PROGRESS';$('launch').textContent='Experiment in progress…';$('launch').disabled=true;$('hint').textContent='GRAVITY HAS TAKEN OVER.';$('power-help').textContent='Push locked. Watch the impacts accumulate.';
   }
+  // Presentation-only randomness: never used by the simulation or replay recipes.
+  const resultJokes={
+    record:[
+      'A personal best. A personnel problem.',
+      'Employee of the descent.',
+      'The stairs would like your autograph.',
+      'A standing ovation. From everyone else.',
+      'Promoted to senior crash consultant.',
+      'Your résumé now includes every step.'
+    ],
+    gentle:[
+      'Gravity sent a polite reminder.',
+      'A minor disagreement with standing.',
+      'The floor accepted your friend request.',
+      'A nap with unnecessary paperwork.',
+      'Technically, that was a delivery.',
+      'The stairs expected more commitment.'
+    ],
+    medium:[
+      'One small step. Several poor choices.',
+      'You have reached your dismountination.',
+      'A practical introduction to downstairs.',
+      'The floor has entered the chat.',
+      'That meeting could have been an elevator.',
+      'Gravity: 1. Dignity: buffering.'
+    ],
+    huge:[
+      'You took the scenic route to horizontal.',
+      'The stairs have filed a noise complaint.',
+      'A masterclass in downward mobility.',
+      'Gravity has renewed your subscription.',
+      'An ambitious merger with the architecture.',
+      'You are now on a first-name basis with concrete.'
+    ],
+    airborne:[
+      'Briefly an aircraft. Permanently unlicensed.',
+      'Your landing gear was mostly optimism.',
+      'Flight mode did not include landing mode.',
+      'The floor declined your request to stay airborne.'
+    ],
+    endless:[
+      'An unpaid internship in gravity.',
+      'Still no elevator in the budget.',
+      'Your downstairs subscription auto-renewed.',
+      'The stairs have more sequels than a movie franchise.'
+    ],
+    observations:[
+      'The handrail declined to comment.',
+      'The safety briefing has been moved to yesterday.',
+      'The lab coat makes this science.',
+      'All steps were taken. None were sensible.',
+      'The incident report now has chapters.',
+      'Our expert panel said “oof” in three languages.',
+      'No stairs were emotionally prepared for this.',
+      'The control group has requested a chair.'
+    ],
+    verdicts:[
+      'Peer review: please use the elevator.',
+      'Recommendation: fewer stairs, more sofa.',
+      'Funding approved. Supervision increased.',
+      'Conclusion: the floor remains undefeated.',
+      'Next experiment: reading the warning sign.',
+      'Research status: impressively horizontal.'
+    ]
+  };
+  const jokeBags=new Map();
+  function nextJoke(category) {
+    let bag=jokeBags.get(category);
+    if(!bag||!bag.remaining.length) {
+      const previous=bag?.previous;
+      const remaining=[...resultJokes[category]];
+      for(let i=remaining.length-1;i>0;i--) {
+        const j=Math.floor(Math.random()*(i+1));[remaining[i],remaining[j]]=[remaining[j],remaining[i]];
+      }
+      if(remaining.at(-1)===previous)[remaining[0],remaining[remaining.length-1]]=[remaining.at(-1),remaining[0]];
+      bag={remaining,previous};jokeBags.set(category,bag);
+    }
+    bag.previous=bag.remaining.pop();return bag.previous;
+  }
+  function resultDescription(record) {
+    const category=record?'record':current.score<=1000?'gentle':
+      layout==='endless'?'endless':current.stats?.airtime>2?'airborne':current.score>5000?'huge':'medium';
+    return {title:nextJoke(category),quip:nextJoke('observations')+' '+nextJoke('verdicts')};
+  }
   function finish(replaying=false){
     if(!replaying)retryRecipe={...runPush,layout};
     else {replayPaused=true;updateReplayControls();}
@@ -431,7 +530,10 @@
     $('save-message').textContent='';
     const record=!replaying&&current.score>best;
     if(record){best=current.score;try{localStorage.setItem(bestKey(),String(best));}catch(_){}$('best').textContent=best.toLocaleString();}
-    $('result-title').textContent=replaying?(replayLabel?'Replay · '+replayLabel:'Replay complete.'):record?'A new personal best.':current.score>5000?'Beautifully ungraceful.':'A solid landing.';
+    const description=replaying?null:resultDescription(record);
+    $('result-outcome').textContent=replaying?'REPLAY COMPLETE':record?'NEW PERSONAL BEST':'EXPERIMENT COMPLETE';
+    $('result-title').textContent=replaying?(replayLabel?'Replay · '+replayLabel:'Replay complete.'):description.title;
+    $('result-quip').textContent=replaying?'Same stairs. Same decisions. Still somehow surprising.':description.quip;
     $('result-detail').textContent=`${current.score.toLocaleString()} points · ${current.hits} impacts · ${current.time.toFixed(2)} seconds`;
     tone(440,880,.25,.06);
     $('stage').setAttribute('data-finished','true');
@@ -700,7 +802,23 @@
     shake=.22;
     if(impactCooldown<=0){impactSlow=.22;impactCooldown=1.5;}
   }
+  let fpsLast=null,fpsElapsed=0,fpsFrames=0;
+  document.addEventListener('visibilitychange',()=>{
+    fpsLast=null;fpsElapsed=0;fpsFrames=0;$('fps').textContent='— FPS';
+  });
+  function updateFps(now) {
+    if(document.hidden)return;
+    if(fpsLast!==null) {
+      fpsElapsed+=now-fpsLast;fpsFrames++;
+      if(fpsElapsed>=500) {
+        $('fps').textContent=Math.round(fpsFrames*1000/fpsElapsed)+' FPS';
+        fpsElapsed=0;fpsFrames=0;
+      }
+    }
+    fpsLast=now;
+  }
   function tick(now){
+    updateFps(now);
     const delta=last?Math.min((now-last)/1000,.05):0;last=now;renderDelta=delta;
     impactSlow=Math.max(0,impactSlow-delta);impactCooldown=Math.max(0,impactCooldown-delta);shake=Math.max(0,shake-delta);
     if (drag) drag.held += delta;
@@ -926,5 +1044,5 @@
   // Losing capture is not a cancellation: retain the gesture until global release.
   // Only pointercancel, reset, or leaving the window cancels an unfinished gesture.
   window.addEventListener('blur', () => { if (drag || launchPress) reset(); });
-  reset();resize();$('welcome').showModal?.();requestAnimationFrame(tick);
+  reset();resize();if(!linkedChamber)$('welcome').showModal?.();requestAnimationFrame(tick);
 })();

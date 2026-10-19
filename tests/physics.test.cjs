@@ -22,9 +22,9 @@ function run(part='chest', angle=15, power=0.7, layout='classic') {
       assert.ok(Math.abs(Math.hypot(a.x-b.x,a.y-b.y)*PPM-segment.length)<1e-8,'Rigid segments must keep their length');
     }
     for(const joint of simulation.joints) {
-      if(joint.broken) continue;
+      assert.equal(joint.hinge.isLimitEnabled(),true);
       const angle=simulation.jointAngle(joint), tolerance=6*Math.PI/180;
-      assert.ok(angle>=joint.min-tolerance && angle<=joint.max+tolerance, `${part}/${angle}/${power}: ${joint.name} exceeded intact limits at ${simulation.time}: ${angle*180/Math.PI}`);
+      assert.ok(angle>=joint.hinge.getLowerLimit()-tolerance && angle<=joint.hinge.getUpperLimit()+tolerance, `${part}/${angle}/${power}: ${joint.name} exceeded active joint limits at ${simulation.time}: ${angle*180/Math.PI}`);
     }
   }
   assert.equal(simulation.active,false);
@@ -108,12 +108,13 @@ test('neck slider stretches, stays bounded and returns under a damped spring', (
   }
   assert.ok(Math.abs(neck.slider.getJointTranslation())<before*0.2);
 });
-test('intact joints hold limits, severe damage releases them, and reset heals', () => {
+test('intact joints hold limits, severe damage widens them, and reset heals', () => {
   const s=new Simulation(), knee=s.joints.find(j=>j.name==='leftKnee'), shin=s.bodyByName.leftShin;
   for(let i=0;i<100;i++)s.damageJoints(shin,200);
   assert.equal(knee.damage,0);assert.equal(knee.hinge.isLimitEnabled(),true);
   s.damageJoints(shin,1200);
-  assert.equal(knee.broken,true);assert.equal(knee.hinge.isLimitEnabled(),false);
+  assert.equal(knee.broken,true);assert.equal(knee.hinge.isLimitEnabled(),true);
+  assert.ok(knee.hinge.getLowerLimit()<knee.min&&knee.hinge.getUpperLimit()>knee.max);
   assert.ok(s.cracks.some(c=>c.fracture));
   const recording=s.snapshot();s.reset();
   assert.ok(s.joints.every(j=>!j.broken&&j.damage===0&&j.hinge.isLimitEnabled()));
@@ -194,7 +195,8 @@ test('hands, feet and spine have bounded joints and can be injured without detac
     assert.equal(joint.hinge.isLimitEnabled(),true);
     s.damageJoints(joint.b.getUserData(),1800);
     assert.equal(joint.broken,true);
-    assert.equal(joint.hinge.isLimitEnabled(),false);
+    assert.equal(joint.hinge.isLimitEnabled(),true);
+    assert.ok(joint.hinge.getUpperLimit()-joint.hinge.getLowerLimit()<Math.PI*2);
     assert.ok(joint.hinge.getBodyA() && joint.hinge.getBodyB());
   }
   s.reset();assert.equal(s.joints.filter(j=>j.broken).length,0);
@@ -304,4 +306,27 @@ test('run statistics measure airborne center-of-mass motion and reset cleanly',(
   const frame=s.snapshot();s.reset();
   assert.deepEqual(s.stats,{steps:0,distance:0,maxSpeed:0,airtime:0});
   assert.ok(frame.stats.distance>.1);
+});
+
+test('every healthy and dislocated joint resists rotation in both directions',()=>{
+  const names=new Simulation().joints.map(j=>j.name);
+  for(const name of names)for(const broken of [false,true])for(const direction of [-1,1]) {
+    const s=new Simulation(),joint=s.joints.find(j=>j.name===name);
+    moveWhole(s,1000,-500);s.world.setGravity(pl.Vec2(0,0));
+    for(let j=s.world.getJointList();j;) {
+      const next=j.getNext();if(j!==joint.hinge)s.world.destroyJoint(j);j=next;
+    }
+    for(const segment of s.bodies)if(segment.body!==joint.a&&segment.body!==joint.b)s.world.destroyBody(segment.body);
+    if(broken)s.breakJoint(joint);
+    const low=joint.hinge.getLowerLimit(),high=joint.hinge.getUpperLimit(),tolerance=6*Math.PI/180;
+    assert.ok(high-low<Math.PI*2,`${name}: no full revolution`);
+    if(broken)assert.ok(low<joint.min&&high>joint.max,`${name}: injury permits extra movement`);
+    for(let i=0;i<720;i++) {
+      joint.b.setAngularVelocity(direction*30);s.world.step(DT/12,24,32);
+      const angle=s.jointAngle(joint);
+      assert.ok(angle>=low-tolerance&&angle<=high+tolerance,`${name}, injured=${broken}, direction=${direction}`);
+      const a=joint.hinge.getAnchorA(),b=joint.hinge.getAnchorB();
+      assert.ok(Math.hypot(a.x-b.x,a.y-b.y)<.03,`${name}: body remains attached`);
+    }
+  }
 });

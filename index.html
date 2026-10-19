@@ -18,12 +18,12 @@
     <div class="intro" hidden><div><p class="eyebrow">A STUDY IN GRAVITY & POOR DECISIONS</p><h1>Stair dismount<span>.</span></h1></div><p class="intro-note">One dummy. Seven test chambers.<br>Make every impact count.</p></div>
     <div class="workspace">
       <div id="game-panel" class="stage-column"><section id="stage" class="arena" aria-label="Stair dismount simulation">
-        <div class="arena-top"><span><span class="live-dot"></span> <span id="status">READY TO DISMOUNT</span></span><div class="arena-top-actions"><span id="chamber-number">TEST CHAMBER / 01</span><button id="stage-reset" class="small-button" type="button" title="Stop the round or replay and reset the character">RESET</button></div></div>
+        <div class="arena-top"><span><span class="live-dot"></span> <span id="status">READY TO DISMOUNT</span></span><div class="arena-top-actions"><span id="fps" title="Rendered frames per second" aria-label="Frames per second">— FPS</span><span id="chamber-number">TEST CHAMBER / 01</span><button id="stage-reset" class="small-button" type="button" title="Stop the round or replay and reset the character">RESET</button></div></div>
         <div class="scoreboard"><p>IMPACT SCORE</p><strong id="score">000000</strong><span>PERSONAL BEST <b id="best">0</b></span></div>
         <div id="impact-notice" class="impact-notice" hidden></div>
         <canvas id="game" aria-label="Ragdoll in a test chamber. Select push settings and press Dismount."></canvas>
         <div class="scene-label"><span id="layout-caption">14 STEPS · CLASSIC</span> <span>·</span> 9.81 m/s² <span>·</span> ZERO REGRETS</div>
-        <div id="result" class="result" hidden><p>EXPERIMENT COMPLETE</p><h2 id="result-title">A solid landing.</h2><p id="result-detail"></p><form id="score-entry" hidden>
+        <div id="result" class="result" hidden><p id="result-outcome">EXPERIMENT COMPLETE</p><h2 id="result-title">A solid landing.</h2><p id="result-quip" class="result-quip"></p><p id="result-detail"></p><form id="score-entry" hidden>
           <label for="initials">TOP 10 — ENTER YOUR INITIALS</label>
           <div class="initials-row"><input id="initials" name="initials" type="text" maxlength="3" minlength="3" pattern="[A-Za-z]{3}" autocomplete="off" autocapitalize="characters" spellcheck="false" required placeholder="AAA" aria-label="Three-letter initials"><button id="save-score" type="submit">Save score</button></div>
         </form><p id="save-message" role="status"></p><button id="again">Try another push ↗</button><p>OR CLICK ANYWHERE ON THE STAGE</p></div>

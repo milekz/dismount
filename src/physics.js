@@ -255,7 +255,12 @@
     }
     breakJoint(joint) {
       if (joint.broken) return;
-      joint.broken=true; joint.damage=1; joint.hinge.enableLimit(false);
+      joint.broken=true; joint.damage=1;
+      // Dislocation relaxes the joint, but attached tissue still prevents free spinning.
+      // These are arcade constraints, not clinical ranges of motion.
+      const extra=joint.name.includes('Shoulder')?25:joint.name.includes('Spine')?25:40;
+      joint.hinge.setLimits(joint.min-extra*RAD,joint.max+extra*RAD);
+      joint.hinge.enableLimit(true);
       joint.hinge.setMaxMotorTorque(0.03);
       this.cracks.push({strength:1,fracture:true});
       joint.b.getUserData().flash=1;
@@ -349,6 +354,6 @@
         cracks:this.cracks.map(c=>({...c})),score:this.score,hits:this.hits,damage:{...this.damage},time:this.time};
     }
   }
-  root.DismountPhysics={Simulation,stair,LAYOUTS,buildStair,DT,PPM,GRAVITY,REPLAY_VERSION:'rigid-2.1.0'};
+  root.DismountPhysics={Simulation,stair,LAYOUTS,buildStair,DT,PPM,GRAVITY,REPLAY_VERSION:'rigid-2.2.0'};
   if (typeof module!=='undefined') module.exports=root.DismountPhysics;
 })(typeof window!=='undefined'?window:globalThis);

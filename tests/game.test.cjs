@@ -6,14 +6,14 @@ const vm = require('node:vm');
 const fs = require('node:fs');
 const physics = require('../src/physics.js');
 
-function setup(AudioContext, storage, reducedMotion=true, viewport={width:900,height:700}) {
+function setup(AudioContext, storage, reducedMotion=true, viewport={width:900,height:700}, url=null) {
   const elements = new Map();
   let translations=[],scales=[];
   const context2d = new Proxy({}, { get: (_, key) => key === 'clearRect' ? () => {translations=[];scales=[];} : key === 'translate' ? (...args)=>translations.push(args) : key === 'scale' ? (...args)=>scales.push(args) : key === 'createLinearGradient' ? () => ({ addColorStop() {} }) : () => {}, set: () => true });
   function element(id) {
     if (!elements.has(id)) elements.set(id, {
       value: id === 'angle' ? '15' : id === 'part' ? 'chest' : '', style: {}, disabled: false,
-      events: {}, options: ['head', 'chest', 'hip', 'leftKnee', 'rightKnee', 'leftHand', 'rightHand', 'leftFoot', 'rightFoot'].map(value => ({ value })), tagName: 'DIV',
+      events: {}, options: (['layout','welcome-layout'].includes(id)?['classic','steep','long','landing','uneven','shaft','endless','finalDrop']:['head', 'chest', 'hip', 'leftKnee', 'rightKnee', 'leftHand', 'rightHand', 'leftFoot', 'rightFoot']).map(value => ({ value })), tagName: 'DIV',
       addEventListener(type, handler) { this.events[type] = handler; },
       capturedPointer: null,
       setPointerCapture(id) { this.capturedPointer = id; },
@@ -42,8 +42,13 @@ function setup(AudioContext, storage, reducedMotion=true, viewport={width:900,he
   const sandbox = { window: { scrollX:0,scrollY:120,scrollTo:(x,y)=>{restoredScroll=[x,y];},matchMedia:()=>({matches:reducedMotion}), AudioContext, DismountPhysics: physics, DismountScores: require('../src/scores.js'), addEventListener(type, callback) { windowEvents[type] = callback; } }, document, devicePixelRatio: 1,
     localStorage: storage || { getItem() { throw new Error('Storage disabled'); }, setItem() { throw new Error('Storage disabled'); } },
     ResizeObserver: class { observe() {} }, requestAnimationFrame(callback) { nextFrame = callback; } };
+  if(url) {
+    sandbox.URL=URL;
+    sandbox.window.location={href:url};
+    sandbox.window.history={state:null,replaceState(state,title,href){sandbox.window.location.href=href;}};
+  }
   vm.runInNewContext(fs.readFileSync(require.resolve('../src/game.js'), 'utf8'), sandbox);
-  return { element, windowEvents, document, documentEvents, restoredScroll:()=>restoredScroll, camera:()=>translations[0], zoom:()=>scales[0]?.[0], click: id => element(id).events.click(), advance(seconds) {
+  return { element, windowEvents, url:()=>sandbox.window.location?.href, document, documentEvents, restoredScroll:()=>restoredScroll, camera:()=>translations[0], zoom:()=>scales[0]?.[0], click: id => element(id).events.click(), advance(seconds) {
     for (let frame = 0; frame < seconds * 60; frame++) { time += 1000 / 60; if (AudioContext?.instance) AudioContext.instance.currentTime = time/1000; nextFrame(time); }
   } };
 }
@@ -723,4 +728,35 @@ test('touch aiming reaches full power on a narrow stage and ignores secondary fi
   game.click('reset');canvas.events.pointerdown(finger);game.windowEvents.resize();
   assert.equal(game.element('status').textContent,'READY TO DISMOUNT');
   assert.equal(canvas.capturedPointer,null);
+});
+
+test('chamber links initialize the selected layout and preserve other URL components',()=>{
+  const game=setup(undefined,undefined,true,undefined,'https://milekz.github.io/dismount/?chamber=endless&source=share#game');
+  assert.equal(game.element('layout').value,'endless');
+  assert.equal(game.element('welcome-layout').value,'endless');
+  assert.match(game.element('layout-caption').textContent,/ENDLESS/);
+  assert.equal(game.element('highscores-title').textContent,'High scores · Endless Stairs');
+  assert.equal(game.element('motion').disabled,true);
+  game.element('layout').value='shaft';game.element('layout').events.change();
+  const url=new URL(game.url());
+  assert.equal(url.searchParams.get('chamber'),'shaft');
+  assert.equal(url.searchParams.get('source'),'share');assert.equal(url.hash,'#game');
+  const invalid=setup(undefined,undefined,true,undefined,'https://milekz.github.io/dismount/?chamber=unknown');
+  assert.equal(invalid.element('layout').value,'classic');
+});
+
+
+test('numeric chamber links follow selector order and accept padded numbers',()=>{
+  const layouts=['classic','steep','long','landing','uneven','shaft','endless','finalDrop'];
+  layouts.forEach((layout,index)=>{
+    const game=setup(undefined,undefined,true,undefined,'https://example.com/?chamber='+(index+1));
+    assert.equal(game.element('layout').value,layout);
+    assert.equal(game.element('chamber-number').textContent,'TEST CHAMBER / '+String(index+1).padStart(2,'0'));
+  });
+  const padded=setup(undefined,undefined,true,undefined,'https://example.com/?chamber=07');
+  assert.equal(padded.element('layout').value,'endless');
+  for(const invalid of ['0','9','-1','1.5','1e0']) {
+    const game=setup(undefined,undefined,true,undefined,'https://example.com/?chamber='+invalid);
+    assert.equal(game.element('layout').value,'classic');
+  }
 });
