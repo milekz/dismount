@@ -64,3 +64,18 @@ test('endless boards accept two-minute recordings without extending other chambe
   assert.equal(new ScoreBoard(storage,'test').save('END',recording).ok,false);
   assert.equal(endless.save('END',{...recording,time:121,steps:14520}).ok,false);
 });
+
+test('characters have isolated boards and legacy human records retain their storage key',()=>{
+  const storage=memory(),human=new ScoreBoard(storage,'test'),robot=new ScoreBoard(storage,'test','classic','robot');
+  human.save('HUM',run(100));robot.save('ROB',run(200));
+  assert.equal(human.key,KEY);assert.notEqual(human.key,robot.key);
+  const legacy=JSON.parse(storage.getItem(KEY));delete legacy.entries[0].character;
+  storage.setItem(KEY,JSON.stringify(legacy));
+  assert.equal(new ScoreBoard(storage,'test').entries[0].nick,'HUM');
+  const loaded=new ScoreBoard(storage,'test','classic','robot');
+  assert.equal(loaded.entries.length,1);assert.equal(loaded.entries[0].character,'robot');
+  assert.equal(new ScoreBoard(storage,'test','classic','knight').entries.length,0);
+  const malformed=JSON.parse(storage.getItem(robot.key));malformed.entries[0].character='human';
+  storage.setItem(robot.key,JSON.stringify(malformed));
+  assert.equal(new ScoreBoard(storage,'test','classic','robot').entries.length,0);
+});

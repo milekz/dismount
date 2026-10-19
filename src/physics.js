@@ -34,12 +34,25 @@
     });
     return {...spec,start:220,top:205,end:x,floor:y+(spec.drop||0),treads};
   }
+  const CHARACTERS = {
+    human:{name:'Human',description:'The original test subject. Balanced weight and anatomical joint limits.',mass:1,damping:1,strength:1,flex:0},
+    robot:{name:'Robot',description:'Heavy metal segments, stiff joints and low bounce.',mass:1.7,damping:2,strength:1.8,flex:0,friction:.55,bounce:.04,air:.04,spin:.1},
+    knight:{name:'Knight',description:'Heavy armor, a weighty chest and helmet, and strongly damped joints.',mass:2.1,damping:2.8,strength:2.2,flex:0,friction:.6,bounce:.06,air:.05,spin:.12},
+    skeleton:{name:'Skeleton',description:'Light bones and loose joints. Tumbles easily and breaks down sooner.',mass:.45,damping:.5,strength:.65,flex:0,friction:.4,bounce:.2,air:.04,spin:.05},
+    inflatable:{name:'Inflatable dancer',description:'Very light tubes, floppy joints and strong air resistance. No hidden fan or powered movement.',mass:.16,damping:.12,strength:.55,flex:15,friction:.5,bounce:.24,air:.65,spin:.12}
+  };
+  const excludedContacts = new Set(['pelvis:torso','abdomen:leftThigh','abdomen:rightThigh','leftUpperArm:neckLink','neckLink:rightUpperArm']);
   const pointNames = ['head','chest','hip','leftElbow','leftHand','rightElbow','rightHand','leftKnee','leftFoot','rightKnee','rightFoot'];
   const v = (x, y) => Vec2(x / PPM, y / PPM);
   const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
 
   class Simulation {
-    constructor(layout='classic') { this.layout=Object.hasOwn(LAYOUTS,layout)?layout:'classic'; this.stair=buildStair(this.layout); this.reset(); }
+    constructor(layout='classic',character='human',engine='rigid-2.3.0') {
+      this.legacy=engine==='rigid-2.2.0';
+      this.layout=Object.hasOwn(LAYOUTS,layout)?layout:'classic';
+      this.character=Object.hasOwn(CHARACTERS,character)?character:'human';
+      this.profile=CHARACTERS[this.character];this.stair=buildStair(this.layout);this.reset();
+    }
     reset() {
       this.stair=buildStair(this.layout);
       this.world = new World(Vec2(0, GRAVITY));
@@ -99,9 +112,32 @@
       // collide, including opposite limbs and forearms against the torso.
       this.world.on('pre-solve', contact => this.prepareContact(contact));
       this.world.on('post-solve', (contact, impulse) => this.recordContact(contact, impulse));
+      this.applyCharacterProfile();
       this.syncPoints();
-      this.stats={steps:0,distance:0,maxSpeed:0,airtime:0};
+      this.stats={steps:0,distance:0,maxSpeed:0,airtime:0,maxFlightSteps:0};
+      this.flightStart=null;
       this.previousCenter=this.massCenter();
+    }
+    applyCharacterProfile() {
+      // Leave the original subject numerically unchanged for existing replay recipes.
+      if(this.character==='human')return;
+      const p=this.profile;
+      for(const s of this.bodies) {
+        const armor=this.character==='knight'&&['torso','head'].includes(s.name)?1.25:1;
+        const factor=p.mass*armor;
+        s.mass*=factor;
+        s.body.setMassData({mass:s.mass,center:s.body.getLocalCenter().clone(),I:s.body.getInertia()*factor});
+        s.body.setLinearDamping(p.air);s.body.setAngularDamping(p.spin);
+        for(let f=s.body.getFixtureList();f;f=f.getNext()){f.setFriction(p.friction);f.setRestitution(p.bounce);}
+      }
+      for(const j of this.joints) {
+        j.damping*=p.damping;j.maxTorque*=p.damping;j.maxForce*=p.strength;
+        j.min-=p.flex*RAD;j.max+=p.flex*RAD;j.hinge.setLimits(j.min,j.max);
+        if(j.spring) {
+          j.spring.stiffness*=p.mass;j.spring.damping*=Math.sqrt(p.mass);
+          j.spring.maxForce*=p.mass;
+        }
+      }
     }
     createStairs() {
       const stair=this.stair;
@@ -194,11 +230,12 @@
       // simultaneous velocity assignment to every limb. Off-center pushes add torque.
       const impulse = this.bodies.reduce((sum,s)=>sum+s.mass,0)*4.6*strength;
       this.pendingPush = strength ? {body:segment.body,local:segment.body.getLocalPoint(v(point.x,point.y)),
-        x:Math.cos(rad)*impulse,y:-Math.sin(rad)*impulse,remaining:0.2} : null;
+        x:Math.cos(rad)*impulse,y:-Math.sin(rad)*impulse,remaining:0.2,
+        fineSteps:!this.legacy&&strength>.8&&/Hand|Foot/.test(segment.name)} : null;
       this.active = true;
       for (const segment of this.bodies) segment.body.setAwake(true);
     }
-    applyJointForces() {
+    applyJointForces(h=H) {
       for (const joint of this.joints) {
         const speed = joint.hinge.getJointSpeed();
         // A bounded, dissipative motor approximates viscous angular damping.
@@ -208,7 +245,7 @@
         const translation = joint.slider.getJointTranslation(), velocity = joint.slider.getJointSpeed();
         const settings = joint.spring, strength = joint.broken ? 0.25 : 1;
         const force = clamp(-(translation*settings.stiffness+velocity*settings.damping)*strength,-settings.maxForce,settings.maxForce);
-        const impulse = Vec2(axis.x*force*H,axis.y*force*H);
+        const impulse = Vec2(axis.x*force*h,axis.y*force*h);
         joint.slider.getBodyB().applyLinearImpulse(impulse,joint.slider.getAnchorB(),true);
         joint.slider.getBodyA().applyLinearImpulse(Vec2(-impulse.x,-impulse.y),joint.slider.getAnchorA(),true);
       }
@@ -218,9 +255,9 @@
       const a=fa.getBody(), b=fb.getBody();
       // Thick capsules near the same anatomical junction overlap by construction.
       // Exclude these structural neighbors; distant limbs still self-collide.
-      const names=[a.getUserData()?.name,b.getUserData()?.name].sort().join(':');
-      if (['pelvis:torso','abdomen:leftThigh','abdomen:rightThigh',
-        'leftUpperArm:neckLink','neckLink:rightUpperArm'].includes(names)) {
+      const aName=a.getUserData()?.name||'',bName=b.getUserData()?.name||'';
+      const names=aName<bName?aName+':'+bName:bName+':'+aName;
+      if (excludedContacts.has(names)) {
         contact.setEnabled(false);return;
       }
       const manifold=contact.getWorldManifold(null);
@@ -235,8 +272,11 @@
       const terrain=fa.getUserData()?.ground ? fa.getUserData() : fb.getUserData();
       const edge=terrain?.edge;
       const edgeFactor=edge ? clamp(1-Math.hypot(position.x*PPM-edge.x,position.y*PPM-edge.y)/9,0,1) : 0;
-      contact.setFriction(0.48+0.2*edgeFactor);
-      contact.setRestitution(0.1+0.15*edgeFactor);
+      // Keep historical human trajectories; other subjects retain their materials.
+      const friction=this.character==='human'?.48:Math.sqrt(fa.getFriction()*fb.getFriction());
+      const bounce=this.character==='human'?.1:Math.max(fa.getRestitution(),fb.getRestitution());
+      contact.setFriction(friction+0.2*edgeFactor);
+      contact.setRestitution(Math.min(.8,bounce+0.15*edgeFactor));
       this.contactData.set(contact,{speed,position:{x:position.x,y:position.y},edgeFactor,
         self:!!a.getUserData()&&!!b.getUserData()});
     }
@@ -262,14 +302,14 @@
       joint.hinge.setLimits(joint.min-extra*RAD,joint.max+extra*RAD);
       joint.hinge.enableLimit(true);
       joint.hinge.setMaxMotorTorque(0.03);
-      this.cracks.push({strength:1,fracture:true});
+      this.cracks.push({strength:1,fracture:true,variant:this.joints.indexOf(joint)%6});
       joint.b.getUserData().flash=1;
     }
     damageJoints(segment, impact) {
       if (impact<=260) return;
       for (const joint of this.joints) {
         if (joint.broken || (joint.a!==segment.body && joint.b!==segment.body)) continue;
-        joint.damage=clamp(joint.damage+((impact-260)/520)**2*(joint.b===segment.body?1:0.45),0,1);
+        joint.damage=clamp(joint.damage+((impact-260)/(520*this.profile.strength))**2*(joint.b===segment.body?1:0.45),0,1);
         if (joint.damage>=1) this.breakJoint(joint);
       }
     }
@@ -287,7 +327,7 @@
           group:s.group,variant:this.hits%6,edge:hit.edgeFactor>0.5};
         this.impacts.push(event);
         if(!this.strongestImpact||points>this.strongestImpact.points)this.strongestImpact={...event};
-        if (force>280) this.cracks.push({strength:Math.min(1,force/800)});
+        if (force>280) this.cracks.push({strength:Math.min(1,force/800),variant:this.hits%6});
       }
     }
     massCenter() {
@@ -305,7 +345,7 @@
       this.previousCenter=center;
       const x=center.x*PPM,y=center.y*PPM;
       const surfaces=this.stair.kind==='shaft'?this.stair.ledges:this.stair.treads;
-      const passed=surfaces.filter(t=>y>=t.y&&(this.stair.kind==='shaft'||x>=t.x)).length;
+      let passed=0;for(const t of surfaces)if(y>=t.y&&(this.stair.kind==='shaft'||x>=t.x))passed++;
       this.stats.steps=Math.max(this.stats.steps,passed);
       let grounded=false;
       for(let c=this.world.getContactList();c;c=c.getNext()) {
@@ -313,29 +353,39 @@
           grounded=true;break;
         }
       }
-      if(!grounded)this.stats.airtime+=DT;
+      if(!grounded) {
+        this.stats.airtime+=DT;
+        if(this.flightStart===null)this.flightStart=passed;
+      }
+      if(this.flightStart!==null) {
+        this.stats.maxFlightSteps=Math.max(this.stats.maxFlightSteps,passed-this.flightStart);
+        if(grounded)this.flightStart=null;
+      }
     }
     step() {
       if (!this.active) return;
       if(this.layout==='endless')this.extendEndlessStairs();
       this.impacts=[];this.cracks=[];this.pendingImpacts.clear();
       for (const s of this.bodies) { s.cooldown=Math.max(0,s.cooldown-DT);s.flash=Math.max(0,s.flash-DT*2); }
-      for (let sub=0;sub<SUBSTEPS;sub++) {
+      // Tiny end segments need finer integration during a strong localized push.
+      // Keep the historical schedule available for saved 2.2 human recipes.
+      const substeps=this.pendingPush?.fineSteps?24:SUBSTEPS,h=DT/substeps;
+      for (let sub=0;sub<substeps;sub++) {
         if (this.pendingPush) {
-          const p=this.pendingPush, fraction=Math.min(H,p.remaining)/0.2;
+          const p=this.pendingPush, fraction=Math.min(h,p.remaining)/0.2;
           p.body.applyLinearImpulse(Vec2(p.x*fraction,p.y*fraction),p.body.getWorldPoint(p.local),true);
-          p.remaining-=H;
+          p.remaining-=h;
           if (p.remaining<1e-8) this.pendingPush=null;
         }
-        this.applyJointForces();
-        this.world.step(H,24,32);
-        this.time+=H;
+        this.applyJointForces(h);
+        this.world.step(h,24,32);
+        this.time+=h;
         // Measured reaction forces impose a strength budget in addition to collision trauma.
         for (const joint of this.joints) {
-          const reaction=joint.hinge.getReactionForce(1/H), force=Math.hypot(reaction.x,reaction.y);
+          const reaction=joint.hinge.getReactionForce(1/h), force=Math.hypot(reaction.x,reaction.y);
           joint.maxReaction=Math.max(joint.maxReaction,force);
           if (!joint.broken && this.time>0.15 && force>joint.maxForce) {
-            joint.damage=clamp(joint.damage+(force/joint.maxForce-1)**2*H*3,0,1);
+            joint.damage=clamp(joint.damage+(force/joint.maxForce-1)**2*h*3,0,1);
             if (joint.damage>=1) this.breakJoint(joint);
           }
         }
@@ -346,7 +396,7 @@
       if ((this.time>2 && this.settled>1.3) || this.time>=(this.layout==='endless'?120:18)) this.active=false;
     }
     snapshot() {
-      return {layout:this.layout,stats:{...this.stats},points:this.points.map(p=>({...p})),
+      return {layout:this.layout,character:this.character,stats:{...this.stats},points:this.points.map(p=>({...p})),
         segments:this.bodies.map(s=>{const [a,b]=this.endpoints(s);return {name:s.name,group:s.group,
           ax:a.x*PPM,ay:a.y*PPM,bx:b.x*PPM,by:b.y*PPM,radius:s.radius,angle:s.body.getAngle(),flash:s.flash,damage:s.damage,hits:s.hits};}),
         joints:this.joints.map(j=>({name:j.name,parent:j.a.getUserData().name,child:j.b.getUserData().name,b:j.marker,x:j.hinge.getAnchorB().x*PPM,y:j.hinge.getAnchorB().y*PPM,broken:j.broken,damage:j.damage})),
@@ -354,6 +404,6 @@
         cracks:this.cracks.map(c=>({...c})),score:this.score,hits:this.hits,damage:{...this.damage},time:this.time};
     }
   }
-  root.DismountPhysics={Simulation,stair,LAYOUTS,buildStair,DT,PPM,GRAVITY,REPLAY_VERSION:'rigid-2.2.0'};
+  root.DismountPhysics={Simulation,stair,LAYOUTS,CHARACTERS,buildStair,DT,PPM,GRAVITY,REPLAY_VERSION:'rigid-2.3.0',supportsReplay:entry=>entry.engine==='rigid-2.3.0'||(entry.engine==='rigid-2.2.0'&&(!entry.character||entry.character==='human'))};
   if (typeof module!=='undefined') module.exports=root.DismountPhysics;
 })(typeof window!=='undefined'?window:globalThis);

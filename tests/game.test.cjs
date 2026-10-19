@@ -6,14 +6,15 @@ const vm = require('node:vm');
 const fs = require('node:fs');
 const physics = require('../src/physics.js');
 
-function setup(AudioContext, storage, reducedMotion=true, viewport={width:900,height:700}, url=null) {
+// Keep shared gesture and replay fixtures on Classic; startup tests pass their own URL.
+function setup(AudioContext, storage, reducedMotion=true, viewport={width:900,height:700}, url='https://example.com/?chamber=classic') {
   const elements = new Map();
-  let translations=[],scales=[];
+  let translations=[],scales=[];const scrollRequests=[];
   const context2d = new Proxy({}, { get: (_, key) => key === 'clearRect' ? () => {translations=[];scales=[];} : key === 'translate' ? (...args)=>translations.push(args) : key === 'scale' ? (...args)=>scales.push(args) : key === 'createLinearGradient' ? () => ({ addColorStop() {} }) : () => {}, set: () => true });
   function element(id) {
     if (!elements.has(id)) elements.set(id, {
       value: id === 'angle' ? '15' : id === 'part' ? 'chest' : '', style: {}, disabled: false,
-      events: {}, options: (['layout','welcome-layout'].includes(id)?['classic','steep','long','landing','uneven','shaft','endless','finalDrop']:['head', 'chest', 'hip', 'leftKnee', 'rightKnee', 'leftHand', 'rightHand', 'leftFoot', 'rightFoot']).map(value => ({ value })), tagName: 'DIV',
+      events: {}, options: (['layout','welcome-layout'].includes(id)?['classic','steep','long','landing','uneven','shaft','endless','finalDrop']:['character','welcome-character'].includes(id)?Object.keys(physics.CHARACTERS):['head', 'chest', 'hip', 'leftKnee', 'rightKnee', 'leftHand', 'rightHand', 'leftFoot', 'rightFoot']).map(value => ({ value })), tagName: 'DIV',
       addEventListener(type, handler) { this.events[type] = handler; },
       capturedPointer: null,
       setPointerCapture(id) { this.capturedPointer = id; },
@@ -24,7 +25,7 @@ function setup(AudioContext, storage, reducedMotion=true, viewport={width:900,he
       },
       children: [], appendChild(child) { this.children.push(child); }, replaceChildren(...children) { this.children=children; }, getAttribute(name) { return this[name]; }, setAttribute(name, value) { this[name] = value; },
       getBoundingClientRect() { return { ...viewport, left: 0, top: 0 }; },
-      getContext() { return context2d; }
+      getContext() { return context2d; },scrollIntoView(options){scrollRequests.push({id,options});}
     });
     return elements.get(id);
   }
@@ -39,7 +40,7 @@ function setup(AudioContext, storage, reducedMotion=true, viewport={width:900,he
       const previous=documentEvents[type];
       documentEvents[type]=event=>{previous?.(event);handler(event);};
     } };
-  const sandbox = { window: { scrollX:0,scrollY:120,scrollTo:(x,y)=>{restoredScroll=[x,y];},matchMedia:()=>({matches:reducedMotion}), AudioContext, DismountPhysics: physics, DismountScores: require('../src/scores.js'), addEventListener(type, callback) { windowEvents[type] = callback; } }, document, devicePixelRatio: 1,
+  const sandbox = { window: { scrollX:0,scrollY:120,scrollTo:(x,y)=>{restoredScroll=[x,y];},matchMedia:()=>({matches:reducedMotion}), AudioContext, DismountSubjects:require('../src/subjects.js'), DismountChallenges:require('../src/challenges.js'), DismountFullscreen:require('../src/fullscreen.js'), DismountAudio:require('../src/audio.js'), DismountReplay:require('../src/replay.js'), DismountPhysics: physics, DismountScores: require('../src/scores.js'), DismountCharacterArt:require('../src/character-art.js'), addEventListener(type, callback) { windowEvents[type] = callback; } }, document, devicePixelRatio: 1,
     localStorage: storage || { getItem() { throw new Error('Storage disabled'); }, setItem() { throw new Error('Storage disabled'); } },
     ResizeObserver: class { observe() {} }, requestAnimationFrame(callback) { nextFrame = callback; } };
   if(url) {
@@ -48,7 +49,7 @@ function setup(AudioContext, storage, reducedMotion=true, viewport={width:900,he
     sandbox.window.history={state:null,replaceState(state,title,href){sandbox.window.location.href=href;}};
   }
   vm.runInNewContext(fs.readFileSync(require.resolve('../src/game.js'), 'utf8'), sandbox);
-  return { element, windowEvents, url:()=>sandbox.window.location?.href, document, documentEvents, restoredScroll:()=>restoredScroll, camera:()=>translations[0], zoom:()=>scales[0]?.[0], click: id => element(id).events.click(), advance(seconds) {
+  return { host:sandbox.window, scrollRequests, element, windowEvents, url:()=>sandbox.window.location?.href, document, documentEvents, restoredScroll:()=>restoredScroll, camera:()=>translations[0], zoom:()=>scales[0]?.[0], click: id => element(id).events.click(), advance(seconds) {
     for (let frame = 0; frame < seconds * 60; frame++) { time += 1000 / 60; if (AudioContext?.instance) AudioContext.instance.currentTime = time/1000; nextFrame(time); }
   } };
 }
@@ -376,6 +377,19 @@ test('audio-enabled falls synthesize varied impact layers, mute, and replay', ()
   game.click('sound');game.click('replay');game.advance(20);
   assert.ok(audio.voices>before,'Unmuted replay must play impacts');
   assert.ok(audio.buffers<=18,'Procedural textures must be cached');
+  for(const id of ['robot','knight','skeleton','inflatable']) {
+    const subject=setup(TestAudio,undefined,true,undefined,'https://example.com/?chamber=classic&character='+id);
+    subject.click('launch');subject.advance(.8);subject.click('launch');subject.advance(20);
+    const sound=TestAudio.instance;
+    assert.equal(subject.element('status').textContent,'EXPERIMENT COMPLETE',id);
+    assert.ok(sound.buffers>1,id+' creates impact textures');
+    assert.ok(sound.filters.some(f=>f.type===(id==='inflatable'?'bandpass':'highpass')),id);
+    const count=sound.voices;
+    subject.click('sound');subject.click('replay');subject.advance(20);
+    assert.equal(sound.voices,count,id+' muted replay');
+    subject.click('sound');subject.click('replay');subject.advance(20);
+    assert.ok(sound.voices>count,id+' audible replay');
+  }
 });
 
 test('vertical mouse drag selects a 90-degree push', () => {
@@ -730,6 +744,20 @@ test('touch aiming reaches full power on a narrow stage and ignores secondary fi
   assert.equal(canvas.capturedPointer,null);
 });
 
+test('startup defaults to Endless Stairs while preserving explicit chamber and character links',()=>{
+  for(const url of [null,'https://example.com/','https://example.com/?chamber=unknown','https://example.com/?character=robot']) {
+    const game=setup(undefined,undefined,true,undefined,url);
+    assert.equal(game.element('layout').value,'endless');
+    assert.equal(game.element('welcome-layout').value,'endless');
+    assert.equal(game.element('chamber-number').textContent,'TEST CHAMBER / 07');
+    assert.match(game.element('welcome-chamber-description').textContent,/Continuously generated stairs/);
+    assert.equal(game.element('motion').disabled,true);
+    assert.equal(game.element('character').value,url?.includes('character=robot')?'robot':'human');
+  }
+  const classic=setup(undefined,undefined,true,undefined,'https://example.com/?chamber=classic');
+  assert.equal(classic.element('layout').value,'classic');
+});
+
 test('chamber links initialize the selected layout and preserve other URL components',()=>{
   const game=setup(undefined,undefined,true,undefined,'https://milekz.github.io/dismount/?chamber=endless&source=share#game');
   assert.equal(game.element('layout').value,'endless');
@@ -742,7 +770,7 @@ test('chamber links initialize the selected layout and preserve other URL compon
   assert.equal(url.searchParams.get('chamber'),'shaft');
   assert.equal(url.searchParams.get('source'),'share');assert.equal(url.hash,'#game');
   const invalid=setup(undefined,undefined,true,undefined,'https://milekz.github.io/dismount/?chamber=unknown');
-  assert.equal(invalid.element('layout').value,'classic');
+  assert.equal(invalid.element('layout').value,'endless');
 });
 
 
@@ -757,6 +785,95 @@ test('numeric chamber links follow selector order and accept padded numbers',()=
   assert.equal(padded.element('layout').value,'endless');
   for(const invalid of ['0','9','-1','1.5','1e0']) {
     const game=setup(undefined,undefined,true,undefined,'https://example.com/?chamber='+invalid);
-    assert.equal(game.element('layout').value,'classic');
+    assert.equal(game.element('layout').value,'endless');
   }
+});
+
+test('character selection and URL keep human as default and render all four alternatives',()=>{
+  const game=setup(undefined,undefined,true,undefined,'https://example.com/?chamber=7');
+  assert.equal(game.element('character').value,'human');
+  assert.equal(game.element('welcome-character').value,'human');
+  for(const id of ['robot','knight','skeleton','inflatable']) {
+    game.element('character').value=id;game.element('character').events.change();game.advance(.1);
+    assert.equal(new URL(game.url()).searchParams.get('character'),id);
+    assert.match(game.element('highscores-title').textContent,new RegExp(physics.CHARACTERS[id].name));
+    assert.equal(game.element('character-description').textContent,physics.CHARACTERS[id].description);
+  }
+  game.element('character').value='human';game.element('character').events.change();
+  assert.equal(new URL(game.url()).searchParams.has('character'),false);
+  const linked=setup(undefined,undefined,true,undefined,'https://example.com/?chamber=7&character=robot');
+  assert.equal(linked.element('layout').value,'endless');assert.equal(linked.element('character').value,'robot');
+  assert.equal(linked.element('welcome-character').value,'robot');linked.advance(.1);
+  const removed=setup(undefined,undefined,true,undefined,'https://example.com/?character=teddy');
+  assert.equal(removed.element('character').value,'human');
+  assert.ok(!Object.hasOwn(physics.CHARACTERS,'teddy'));
+  const bad=setup(undefined,undefined,true,undefined,'https://example.com/?character=unknown');
+  assert.equal(bad.element('character').value,'human');
+});
+
+test('robot records, exact retry and saved replays retain their character',()=>{
+  const values=new Map(),storage={getItem:key=>values.get(key)||null,setItem:(key,value)=>values.set(key,value)};
+  const game=setup(undefined,storage,true,undefined,'https://example.com/?chamber=1&character=robot');
+  game.click('launch');game.advance(.6);game.click('launch');
+  assert.equal(game.element('character').disabled,true);game.advance(20);
+  const score=game.element('score').textContent;
+  game.element('initials').value='ROB';game.element('score-entry').events.submit({preventDefault(){}});
+  const key=require('../src/scores.js').KEY+'-character-robot';
+  assert.equal(JSON.parse(values.get(key)).entries[0].character,'robot');
+  game.click('retry');game.advance(20);assert.equal(game.element('score').textContent,score);
+  const reload=setup(undefined,storage,true,undefined,'https://example.com/?chamber=1&character=robot');
+  const button=reload.element('score-rows').children[0].children[3].children[0];
+  reload.element('score-rows').events.click({target:{closest:()=>button}});reload.advance(22);
+  assert.equal(reload.element('score').textContent,score);
+  assert.equal(reload.element('result-title').textContent,'Replay · ROB');
+  reload.element('character').value='human';reload.element('character').events.change();
+  assert.equal(reload.element('board-empty').hidden,false);
+});
+
+test('fullscreen settings reuse controls, and Escape closes the drawer first',async()=>{
+  const g=setup();await g.click('fullscreen');
+  assert.equal(g.element('settings-toggle').hidden,false);
+  assert.ok(g.element('drawer-body').children.includes(g.element('push-controls')));
+  g.click('settings-toggle');assert.equal(g.element('settings-drawer').hidden,false);
+  g.documentEvents.keydown({key:'Escape',preventDefault(){},target:{tagName:'BUTTON'}});
+  assert.equal(g.element('settings-drawer').hidden,true);
+  assert.equal(g.element('game-panel')['data-expanded'],'true');
+  await g.click('fullscreen');assert.ok(g.element('control-home').children.includes(g.element('push-controls')));
+});
+
+test('subject reports, volume persistence, challenge state, ghost and replay scrolling',()=>{
+  const values=new Map(),storage={getItem:k=>values.get(k)||null,setItem:(k,v)=>values.set(k,v)};
+  const g=setup(undefined,storage);
+  g.element('character').value='inflatable';g.element('character').events.change();
+  assert.equal(g.element('damage-map-heading').textContent,'Tube damage map');
+  assert.equal(g.element('recovery-overall-caption').textContent,'Air retention');
+  g.element('volume').value='25';g.element('volume').events.input();assert.equal(values.get('dismount-volume'),'0.25');
+  g.element('character').value='human';g.element('character').events.change();
+  g.element('challenge').value='gentle';g.element('challenge').events.change();
+  g.click('drop');assert.equal(g.element('challenge').disabled,true);g.advance(20);
+  assert.equal(g.element('challenge-status').hidden,false);
+  assert.equal(g.element('ghost').disabled,false);g.click('ghost');
+  assert.equal(g.element('ghost')['aria-pressed'],'true');
+  g.click('replay');assert.equal(g.scrollRequests.at(-1).id,'game-panel');
+  assert.equal(g.scrollRequests.at(-1).options.behavior,'auto');
+  g.click('stage-reset');g.element('layout').value='shaft';g.element('layout').events.change();
+  assert.equal(g.element('ghost').disabled,true);
+});
+
+test('saved replay worker is cancelled on reset, ignores stale replies and caches valid recordings',()=>{
+  const {Recording}=require('../src/replay.js');
+  const sim=new physics.Simulation(),frames=new Recording();frames.push(sim.snapshot());sim.push('chest',15,.8);
+  while(sim.active){sim.step();const f=sim.snapshot();f.impacts=sim.impacts;frames.push(f);}
+  const end=frames.at(-1),entry={id:'worker-test',nick:'CPU',score:end.score,hits:end.hits,time:end.time,steps:frames.length-1,layout:'classic',character:'human',engine:physics.REPLAY_VERSION,savedAt:1,push:{part:'chest',angle:15,power:.8}};
+  const storage={getItem:k=>k==='dismount-scoreboard-v2'?JSON.stringify({version:1,entries:[entry]}):null,setItem(){}};
+  const g=setup(undefined,storage,true,undefined,'https://example.com/?chamber=1');const workers=[];
+  g.host.Worker=class{constructor(){workers.push(this);}postMessage(e){this.entry=e;}terminate(){this.stopped=true;}};
+  const button={getAttribute:()=>entry.id},replay=()=>g.element('score-rows').events.click({target:{closest:()=>button}});
+  replay();assert.equal(workers.length,1);assert.ok(g.scrollRequests.length);
+  g.click('stage-reset');assert.equal(workers[0].stopped,true);
+  workers[0].onmessage({data:{recording:frames.packet()}});assert.equal(g.element('status').textContent,'READY TO DISMOUNT');
+  replay();workers[1].onmessage({data:{recording:frames.packet()}});
+  assert.equal(g.element('status').textContent,'REPLAYING EXPERIMENT');g.click('stage-reset');replay();
+  assert.equal(workers.length,2,'second playback uses cached recording');
+  assert.equal(g.element('status').textContent,'REPLAYING EXPERIMENT');
 });

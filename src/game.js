@@ -1,28 +1,38 @@
 /* Canvas renderer and game state. Runs directly from index.html, including file://. */
 (() => {
   'use strict';
-  const {Simulation, LAYOUTS, buildStair, DT, REPLAY_VERSION} = window.DismountPhysics;
+  const {Simulation, LAYOUTS, CHARACTERS, buildStair, DT, REPLAY_VERSION, supportsReplay} = window.DismountPhysics;
+  const {Recording,validEnd}=window.DismountReplay;
   const {ScoreBoard, normalizeNick} = window.DismountScores;
   let storage;
   try { storage = localStorage; } catch (_) {}
-  let linkedChamber=null;
+  let linkedChamber=null, linkedCharacter=null;
   try {
-    const requested=new URL(window.location.href).searchParams.get('chamber');
+    const params=new URL(window.location.href).searchParams;
+    const requested=params.get('chamber'),requestedCharacter=params.get('character');
+    if(Object.hasOwn(CHARACTERS,requestedCharacter))linkedCharacter=requestedCharacter;
     const selected=/^\d+$/.test(requested)
       ? document.getElementById('layout').options[Number(requested)-1]?.value
       : requested;
     if(Object.hasOwn(LAYOUTS,selected))linkedChamber=selected;
   } catch (_) { /* Keep the default when URL access is unavailable. */ }
-  let layout=linkedChamber||'classic', board=new ScoreBoard(storage,REPLAY_VERSION,layout);
-  const boards=new Map([[layout,board]]), bests=new Map();
-  let sim = new Simulation(layout);
+  let layout=linkedChamber||'endless', character=linkedCharacter||'human';
+  const selectionKey=()=>layout+':'+character;
+  let board=new ScoreBoard(storage,REPLAY_VERSION,layout,character);
+  const boards=new Map([[selectionKey(),board]]), bests=new Map();
+  let sim = new Simulation(layout,character);
   let selectedBody='torso', motion=false, injuryRings=false, injuryLabels=true;
   try { injuryRings=storage?.getItem('dismount-injury-rings')==='on'; } catch (_) { /* Optional preference. */ }
   try { injuryLabels=storage?.getItem('dismount-injury-labels')!=='off'; } catch (_) { /* Optional preference. */ }
   const motionEnabled=()=>motion&&layout!=='endless';
   let camera=null, renderDelta=0, impactSlow=0, impactCooldown=0, shake=0;
-  const bestKey=()=>layout==='classic'?'dismount-anatomy-best-v2':'dismount-anatomy-best-v2-'+layout;
-  let runPush = null, pendingScore = null, playbackFrames = [], replayJob = null, replayLabel = '';
+  const bestKey=()=>(layout==='classic'?'dismount-anatomy-best-v2':'dismount-anatomy-best-v2-'+layout)+(character==='human'?'':'-character-'+character);
+  let replayCache=null,ghostFrames=null,ghostEnabled=false,attemptCompleted=false,challenge='none';
+  const {themes}=window.DismountSubjects;
+  const {goals,evaluate}=window.DismountChallenges;
+  const theme=()=>themes[current.character||'human'];
+  const replayKey=entry=>JSON.stringify([entry.id,entry.engine,entry.layout,entry.character,entry.push,entry.score,entry.hits,entry.time,entry.steps]);
+  let runPush = null, pendingScore = null, playbackFrames = new Recording(), replayJob = null, replayLabel = '';
   const dom=new Map();
   const $ = id => {if(!dom.has(id))dom.set(id,document.getElementById(id));return dom.get(id);};
   const chambers=Object.fromEntries(Object.keys(LAYOUTS).map(id=>[id,buildStair(id)]));
@@ -31,11 +41,16 @@
   const canvas = $('game'), ctx = canvas.getContext('2d');
   const groups = ['Head', 'Torso', 'Arms', 'Legs'];
   let mode = 'ready', power = 0, meterTime = 0, accumulator = 0, last = 0;
-  let frames = [], replayIndex = 0, slow = false, perspective = true, best = 0;
-  let sound = true, audio = null, particles = [], current = sim.snapshot();
+  let frames = new Recording(), replayIndex = 0, slow = false, perspective = true, best = 0;
+  let particles = [], current = sim.snapshot();
+  const audioFx=window.DismountAudio.createAudio({host:window,storage,getSubject:()=>current.character,onChange:label=>updateSoundControls(label)});
+  const tone=(...args)=>audioFx.tone(...args),unlockAudio=()=>audioFx.unlock();
   let launchPress = null, suppressLaunchClick = false;
-  let drag = null, master = null, lastThud = -1, lastCrack = -1, noiseBuffers = new Map(), soundVariant = 0, chargeBeat = 0;
-  let width = 0, height = 0, scale = 1, offsetX = 0, offsetY = 0;
+  let drag = null, chargeBeat = 0;
+  let width = 0, height = 0, scale = 1, offsetX = 0, offsetY = 0,backgroundGradient=null,lastDraw=-Infinity;
+  const reportValues=new Map();
+  function reportText(id,value){if(reportValues.get(id)!==value){$(id).textContent=value;reportValues.set(id,value);}}
+  function reportAttr(id,key,value){const cache=id+':'+key;if(reportValues.get(cache)!==value){$(id).setAttribute(key,value);reportValues.set(cache,value);}}
   try { best = Math.max(0, Number(localStorage.getItem(bestKey())) || 0); } catch (_) { /* Storage may be disabled. */ }
   $('best').textContent = best.toLocaleString();
   for (const group of groups) {
@@ -46,7 +61,8 @@
   }
   function resize() {
     const rect = canvas.getBoundingClientRect(), ratio = Math.min(devicePixelRatio || 1, 2);
-    width = rect.width; height = rect.height;
+    width = rect.width; height = rect.height;backgroundGradient=null;lastDraw=-Infinity;
+    $('control-home').style.setProperty?.('--stage-height',$('stage').getBoundingClientRect().height+'px');
     canvas.width = width * ratio; canvas.height = height * ratio;
     ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
   }
@@ -62,7 +78,7 @@
   function circle(x,y,r,color) { ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.fillStyle=color;ctx.fill(); }
   function render() {
     ctx.clearRect(0,0,width,height);
-    const gradient=ctx.createLinearGradient(0,0,width,height);gradient.addColorStop(0,'#e7e9e0');gradient.addColorStop(1,'#dce0d2');ctx.fillStyle=gradient;ctx.fillRect(0,0,width,height);
+    if(!backgroundGradient){backgroundGradient=ctx.createLinearGradient(0,0,width,height);backgroundGradient.addColorStop(0,'#e7e9e0');backgroundGradient.addColorStop(1,'#dce0d2');}ctx.fillStyle=backgroundGradient;ctx.fillRect(0,0,width,height);
     const endless=(current.layout||layout)==='endless';
     const firstStep=endless?Math.max(0,Math.floor((Math.min(...current.points.map(p=>p.x))-220)/48)-8):0;
     const stair=endless?buildStair('endless',firstStep):chambers[current.layout||layout];
@@ -140,6 +156,16 @@
     // Warning stripe on the starting ledge.
     for(let x=65;x<205;x+=18)polygon([[x,205],[x+9,205],[x+9,213],[x,213]],'#8e9a7d');
     ctx.fillStyle='#8b967e';ctx.font='12px monospace';ctx.fillText('START /',64,245);
+    if(ghostEnabled&&ghostFrames&&(mode==='running'||mode==='ready'||mode==='charging'||mode==='aiming')) {
+      const ghost=ghostFrames.at(Math.min(Math.round(current.time/DT),ghostFrames.length-1));
+      ctx.save();ctx.globalAlpha=.22;
+      for(const part of ghost.segments) {
+        if(part.name==='head')circle(part.ax,part.ay,part.radius,'#48788b');
+        else line({x:part.ax,y:part.ay},{x:part.bx,y:part.by},'#48788b',part.radius*2);
+      }
+      ctx.restore();
+    }
+    const characterId=current.character||'human';
     const pts=current.points;
     const center=pts[2],ground=center.x<220?205:stair.kind==='shaft'?(stair.ledges.find(t=>center.x>=t.x&&center.x<=t.x+t.width&&t.y>=center.y)?.y||stair.floor):(stair.treads.find(t=>center.x<t.x+t.width)?.y||stair.floor);
     ctx.save();ctx.globalAlpha=.13;ctx.fillStyle='#3f5032';ctx.beginPath();ctx.ellipse(center.x,ground,50,7,0,0,Math.PI*2);ctx.fill();ctx.restore();
@@ -149,6 +175,7 @@
       'torso','abdomen','pelvis','rightThigh','rightShin','rightFoot','rightUpperArm','rightForearm','rightHand'];
     for (const name of drawOrder) {
       const segment = current.segments.find(s => s.name === name);
+      if(characterId!=='human'){window.DismountCharacterArt.drawSegment(ctx,segment,characterId);continue;}
       const far = name.startsWith('left'), r = segment.radius;
       const length = Math.hypot(segment.bx-segment.ax,segment.by-segment.ay);
       const upper = name.includes('UpperArm'), leg = /Thigh|Shin/.test(name);
@@ -205,6 +232,8 @@
     }
     const head=pts[0];
     ctx.save();ctx.translate(head.x,head.y);ctx.rotate(current.segments.find(s=>s.name==='head').angle);
+    if(characterId!=='human')window.DismountCharacterArt.drawHead(ctx,characterId,head.flash);
+    else {
     // Side-profile face: jaw, nose, ear and hair replace the mannequin visor.
     ctx.beginPath();ctx.moveTo(-10,7);
     ctx.bezierCurveTo(-16,-2,-12,-14,-2,-14);
@@ -224,6 +253,7 @@
     line({x:5,y:-5},{x:9,y:-4},'#644a3b',1);
     circle(8,-2,1.1,'#303b36');
     line({x:6,y:7},{x:10,y:7},'#9b624f',1);
+    }
     ctx.restore();
     // Target indicator and push direction.
     if(mode==='ready'||mode==='charging'||mode==='aiming'){
@@ -234,7 +264,7 @@
       const start={x:p.x-arrowLength*Math.cos(angle),y:p.y+arrowLength*Math.sin(angle)},end={x:p.x-28*Math.cos(angle),y:p.y+28*Math.sin(angle)};
       line(start,end,arrowColor,3);
       polygon([[end.x,end.y],[end.x-13*Math.cos(angle-.45),end.y+13*Math.sin(angle-.45)],[end.x-13*Math.cos(angle+.45),end.y+13*Math.sin(angle+.45)]],arrowColor);
-      ctx.fillStyle='#a16243';ctx.font='11px monospace';ctx.fillText('TEST SUBJECT 01',Math.max(30,p.x-70),35);
+      ctx.fillStyle='#a16243';ctx.font='11px monospace';ctx.fillText(CHARACTERS[current.character||'human'].name.toUpperCase()+' / 01',Math.max(30,p.x-70),35);
     }
     for(const p of particles){
       const color=p.kind==='joint'?'#b72f29':p.edge?'#d9562e':'#527b42';
@@ -248,12 +278,12 @@
   function updateReport() {
     const stats=current.stats||{steps:0,distance:0,maxSpeed:0,airtime:0};
     $('stat-steps-label').textContent=(current.layout||layout)==='shaft'?'Ledges passed':'Steps passed';
-    $('stat-steps').textContent=String(stats.steps);
-    $('stat-distance').textContent=stats.distance.toFixed(2)+' m';
-    $('stat-speed').textContent=stats.maxSpeed.toFixed(2)+' m/s';
-    $('stat-airtime').textContent=stats.airtime.toFixed(2)+' s';
-    updateInjuryMap();
-    $('score').textContent=String(current.score).padStart(6,'0');
+    reportText('stat-steps',String(stats.steps));
+    reportText('stat-distance',stats.distance.toFixed(2)+' m');
+    reportText('stat-speed',stats.maxSpeed.toFixed(2)+' m/s');
+    reportText('stat-airtime',stats.airtime.toFixed(2)+' s');
+    updateInjuryMap();updateChallenge();
+    reportText('score',String(current.score).padStart(6,'0'));
     $('injuries').textContent=(current.joints||[]).filter(joint=>joint.broken).length+' / '+current.joints.length;
     $('hits').textContent=current.hits+' HITS';$('elapsed').textContent=current.time.toFixed(2)+' s';
     for(const group of groups){$('value-'+group).textContent=current.damage[group].toLocaleString();$('bar-'+group).style.width=Math.min(100,current.damage[group]/80)+'%';}
@@ -266,20 +296,20 @@
     for(const segment of current.segments) {
       const node=$('map-'+segment.name), intensity=Math.min(1,segment.damage/3000);
       const color=segment.damage ? `hsl(${Math.round(42-42*intensity)} 75% ${Math.round(65-23*intensity)}%)` : '#cbd2c1';
-      node.setAttribute('stroke',color);
-      node.setAttribute('fill',color);
+      reportAttr('map-'+segment.name,'stroke',color);
+      reportAttr('map-'+segment.name,'fill',color);
       const text=partLabels[segment.name]+': '+segment.damage.toLocaleString()+' points, '+segment.hits+' hits';
-      node.setAttribute('aria-label',text);$('map-title-'+segment.name).textContent=text;
+      reportAttr('map-'+segment.name,'aria-label',text);reportText('map-title-'+segment.name,text);
     }
     for(const joint of current.joints) {
       const node=$('map-joint-'+joint.name);
-      node.setAttribute('fill',joint.broken?'#b72f29':joint.damage>0?'#e8a23e':'#f7f6f1');
-      node.setAttribute('stroke',joint.broken?'#6e1714':'#66715c');
-      node.setAttribute('r',joint.broken?'4':'2.5');
-      $('map-joint-title-'+joint.name).textContent=joint.name.replace(/([A-Z])/g,' $1')+': '+(joint.broken?'dislocated':joint.damage>0?'strained':'intact');
+      reportAttr('map-joint-'+joint.name,'fill',joint.broken?'#b72f29':joint.damage>0?'#e8a23e':'#f7f6f1');
+      reportAttr('map-joint-'+joint.name,'stroke',joint.broken?'#6e1714':'#66715c');
+      reportAttr('map-joint-'+joint.name,'r',joint.broken?'4':'2.5');
+      $('map-joint-title-'+joint.name).textContent=joint.name.replace(/([A-Z])/g,' $1')+': '+(joint.broken?theme().broken:joint.damage>0?theme().strained:'intact');
     }
     const broken=current.joints.filter(j=>j.broken).map(j=>j.name.replace(/([A-Z])/g,' $1').toLowerCase());
-    $('injury-list').textContent=broken.length?'Dislocated: '+broken.join(', ')+'.':'No dislocations.';
+    $('injury-list').textContent=broken.length?theme().event+': '+broken.join(', ')+'.':theme().none;
     updateBodyDetails();
     const hit=current.strongestImpact;
     $('strongest-hit').textContent=hit?partLabels[hit.segment]+' · +'+hit.points.toLocaleString()+' points'+(hit.edge?' · stair edge':''):'No impacts yet.';
@@ -292,8 +322,8 @@
   }
   function setRecoveryMeter(prefix,value) {
     $(prefix+'-meter').value=value;
-    $(prefix+'-meter').setAttribute('aria-valuetext',value+'% — fictional game estimate');
-    $(prefix+'-value').textContent=value+'%';
+    reportAttr(prefix+'-meter','aria-valuetext',value+'% — fictional game estimate');
+    reportText(prefix+'-value',value+'%');
   }
   function updateBodyDetails() {
     const body=current.segments.find(s=>s.name===selectedBody);
@@ -304,8 +334,8 @@
     const label=j=>j.name.replace(/([A-Z])/g,' $1').toLowerCase();
     $('body-detail-title').textContent=partLabels[selectedBody];
     $('body-detail-score').textContent=body.damage.toLocaleString()+' points · '+body.hits+' hits';
-    $('body-detail-joints').textContent=joints.map(j=>label(j)+': '+(j.broken?'dislocated':j.damage>0?'strained '+Math.round(j.damage*100)+'%':'intact')).join(' · ')||'No articulated joints.';
-    for(const name of Object.keys(partLabels))$('map-'+name).setAttribute('aria-pressed',String(name===selectedBody));
+    $('body-detail-joints').textContent=joints.map(j=>label(j)+': '+(j.broken?theme().broken:j.damage>0?theme().strained+' '+Math.round(j.damage*100)+'%':'intact')).join(' · ')||'No articulated joints.';
+    for(const name of Object.keys(partLabels))reportAttr('map-'+name,'aria-pressed',String(name===selectedBody));
     $('inspect-part').value=selectedBody;
   }
   for(const name of Object.keys(partLabels)) {
@@ -348,30 +378,69 @@
     if(layout==='endless')return;
     motion=!motion;impactSlow=0;shake=0;camera=null;updateMotionToggle();
   });
+  const originalMapPaths=Object.fromEntries(['head','torso'].map(name=>[name,$('map-'+name).getAttribute('d')]));
+  function applyReportTheme() {
+    const t=themes[character];
+    $('damage-map-heading').textContent=t.title;
+    $('summary-joint-caption').textContent=character==='robot'?'FAILED JOINTS':character==='inflatable'?'FAILED SEAMS':character==='skeleton'?'SEPARATED JOINTS':'DISLOCATED JOINTS';
+    $('recovery-overall-caption').textContent=t.overall;$('recovery-part-caption').textContent=t.part;
+    $('recovery-help').textContent=t.help;
+    $('map-legend').textContent='Gray: no impact · Yellow → red: damage. Red joint dots: '+t.broken+'.';
+    $('body-map-details').setAttribute('visibility',character==='human'?'visible':'hidden');
+    for(const name of ['head','torso'])$('map-'+name).setAttribute('d',t[name]||originalMapPaths[name]);
+  }
+  function updateGhost() {
+    $('ghost').disabled=!ghostFrames;
+    $('ghost').textContent=ghostEnabled?'GHOST ON':'GHOST OFF';$('ghost').setAttribute('aria-pressed',String(ghostEnabled));
+  }
+  $('ghost').addEventListener('click',()=>{ghostEnabled=!ghostEnabled;updateGhost();lastDraw=-Infinity;});
+  $('challenge').value=challenge;
+  $('challenge-description').textContent=goals[challenge].description;
+  $('challenge').addEventListener('change',()=>{
+    if(!['ready','finished'].includes(mode)){$('challenge').value=challenge;return;}
+    challenge=Object.hasOwn(goals,$('challenge').value)?$('challenge').value:'none';
+    $('challenge-description').textContent=goals[challenge].description;updateChallenge();
+  });
+  function updateChallenge() {
+    const result=evaluate(challenge,current,mode==='ready'?null:runPush);
+    $('challenge-status').hidden=challenge==='none'||mode==='replay'||mode==='loadingReplay'||!!replayLabel;
+    reportText('challenge-status',(result.complete?'✓ Complete · ':'')+result.text);
+    reportAttr('challenge-status','data-complete',String(result.complete));
+  }
   function updateChamberNumber() {
     const number=Array.from($('layout').options).findIndex(option=>option.value===layout)+1;
     $('chamber-number').textContent='TEST CHAMBER / '+String(number).padStart(2,'0');
     $('layout-caption').textContent=layout==='endless'?'ENDLESS STAIRS · 120 s MAX':LAYOUTS[layout].count+(LAYOUTS[layout].kind==='shaft'?' LEDGES · ':' STEPS · ')+LAYOUTS[layout].name.toUpperCase();
-    $('highscores-title').textContent='High scores · '+LAYOUTS[layout].name;
+    $('highscores-title').textContent='High scores · '+LAYOUTS[layout].name+(character==='human'?'':' · '+CHARACTERS[character].name);
+    $('character-description').textContent=CHARACTERS[character].description;
+    applyReportTheme();
   }
   $('layout').value=layout;
+  $('character').value=character;
   updateChamberNumber();
   function updateChamberUrl() {
     try {
       const url=new URL(window.location.href);
       url.searchParams.set('chamber',layout);
+      if(character==='human')url.searchParams.delete('character');
+      else url.searchParams.set('character',character);
       window.history.replaceState(window.history.state,'',url.href);
     } catch (_) { /* Selection still works for restricted embeds and local files. */ }
   }
   function changeChamber() {
-    if(!['ready','finished'].includes(mode)||!Object.hasOwn(LAYOUTS,$('layout').value)){$('layout').value=layout;return;}
-    bests.set(layout,best);layout=$('layout').value;updateChamberNumber();updateChamberUrl();sim=new Simulation(layout);frames=[];retryRecipe=null;
-    if(!boards.has(layout))boards.set(layout,new ScoreBoard(storage,REPLAY_VERSION,layout));
-    board=boards.get(layout);best=0;
+    if(!['ready','finished'].includes(mode)||!Object.hasOwn(LAYOUTS,$('layout').value)||!Object.hasOwn(CHARACTERS,$('character').value)) {
+      $('layout').value=layout;$('character').value=character;return;
+    }
+    bests.set(selectionKey(),best);layout=$('layout').value;character=$('character').value;
+    updateChamberNumber();updateChamberUrl();sim=new Simulation(layout,character);frames=new Recording();ghostFrames=null;attemptCompleted=false;updateGhost();retryRecipe=null;
+    const key=selectionKey();
+    if(!boards.has(key))boards.set(key,new ScoreBoard(storage,REPLAY_VERSION,layout,character));
+    board=boards.get(key);best=0;
     try{best=Math.max(0,Number(storage.getItem(bestKey()))||0);}catch(_){}
-    best=Math.max(best,bests.get(layout)||0,...board.entries.map(e=>e.score));$('best').textContent=best.toLocaleString();
+    best=Math.max(best,bests.get(key)||0,...board.entries.map(e=>e.score));$('best').textContent=best.toLocaleString();
     reset();
   }
+  $('character').addEventListener('change',changeChamber);
   $('layout').addEventListener('change',changeChamber);
   const chamberDescriptions={
     classic:'14 regular steps. A balanced starting point for your first experiments.',
@@ -384,17 +453,23 @@
     finalDrop:'Six steps followed by a deep drop to the floor below.'
   };
   function describeWelcomeChamber() {
-    $('welcome-chamber-description').textContent=chamberDescriptions[$('welcome-layout').value]||chamberDescriptions.classic;
+    $('welcome-chamber-description').textContent=chamberDescriptions[$('welcome-layout').value]||chamberDescriptions.endless;
   }
   $('welcome-layout').value=layout;describeWelcomeChamber();
+  $('welcome-character').value=character;
+  function describeWelcomeCharacter() {
+    $('welcome-character-description').textContent=CHARACTERS[$('welcome-character').value]?.description||CHARACTERS.human.description;
+  }
+  describeWelcomeCharacter();
+  $('welcome-character').addEventListener('change',describeWelcomeCharacter);
   $('welcome-layout').addEventListener('change',describeWelcomeChamber);
   let welcomeClosing=false;
   function enterWelcomeChamber() {
     if(welcomeClosing)return;
-    const selected=$('welcome-layout').value;
-    if(!Object.hasOwn(LAYOUTS,selected))return;
+    const selected=$('welcome-layout').value,selectedCharacter=$('welcome-character').value;
+    if(!Object.hasOwn(LAYOUTS,selected)||!Object.hasOwn(CHARACTERS,selectedCharacter))return;
     unlockAudio();
-    $('layout').value=selected;changeChamber();
+    $('layout').value=selected;$('character').value=selectedCharacter;changeChamber();
     welcomeClosing=true;
     $('welcome').setAttribute('data-closing','true');
     window.setTimeout(()=>{
@@ -414,12 +489,54 @@
     $('status').setAttribute('aria-busy',String(mode==='loadingReplay'));
     const unavailable=!retryRecipe||!['ready','finished','replay'].includes(mode);
     const historicalAngle=retryRecipe&&(retryRecipe.angle < -100 || retryRecipe.angle > 100);
-    $('retry-edit').disabled=unavailable;$('retry').disabled=unavailable||historicalAngle;
-    $('retry').title=historicalAngle?'This historical angle is outside the current range. Use Tweak last push.':'';
+    const historicalPhysics=retryRecipe?.engine&&retryRecipe.engine!==REPLAY_VERSION;
+    $('retry-edit').disabled=unavailable;$('retry').disabled=unavailable||historicalAngle||historicalPhysics;
+    $('retry').title=historicalPhysics?'This replay uses older physics. Use Tweak last push.':historicalAngle?'This historical angle is outside the current range. Use Tweak last push.':'';
     $('slow').disabled=mode==='replay'||mode==='loadingReplay';
-    $('part').disabled=value;$('angle').disabled=value;$('layout').disabled=!['ready','finished'].includes(mode);renderBoard();
+    $('part').disabled=value;$('angle').disabled=value;$('layout').disabled=!['ready','finished'].includes(mode);$('character').disabled=$('layout').disabled;$('challenge').disabled=$('layout').disabled;renderBoard();
   }
-  function reset(){playbackFrames=[];replayIndex=0;peakFrame=0;replayPaused=false;$('replay-controls').hidden=true;$('retry-settings').hidden=true;noticeLife=0;$('impact-notice').hidden=true;camera=null;impactSlow=0;impactCooldown=0;shake=0;replayJob=null;pendingScore=null;replayLabel='';$('score-entry').hidden=true;$('save-message').textContent='';cancelLaunchPress();$('stage').setAttribute('data-finished','false');cancelDrag();mode='ready';sim.reset();current=sim.snapshot();particles=[];accumulator=0;power=0;$('drop').disabled=false;$('result').hidden=true;$('launch').disabled=false;$('launch').innerHTML='Hold to charge <span>↗</span>';$('status').textContent='READY TO DISMOUNT';$('hint').textContent='HOLD OR DRAG ANYWHERE. RELEASE TO PUSH.';$('power-value').textContent='—';$('power-fill').style.width='0%';$('power-help').textContent='Hold and release to push, or use two short clicks.';$('replay').disabled=!frames.length;lock(false);updateReport();}
+  function reset() {
+    audioFx.clear();
+    replayJob?.worker?.terminate();
+    playbackFrames=new Recording();
+    replayIndex=0;
+    peakFrame=0;
+    replayPaused=false;
+    $('replay-controls').hidden=true;
+    $('retry-settings').hidden=true;
+    noticeLife=0;
+    $('impact-notice').hidden=true;
+    camera=null;
+    impactSlow=0;
+    impactCooldown=0;
+    shake=0;
+    replayJob=null;
+    pendingScore=null;
+    replayLabel='';
+    $('score-entry').hidden=true;
+    $('save-message').textContent='';
+    cancelLaunchPress();
+    $('stage').setAttribute('data-finished','false');
+    cancelDrag();
+    mode='ready';
+    sim.reset();
+    current=sim.snapshot();
+    particles=[];
+    accumulator=0;
+    power=0;
+    $('drop').disabled=false;
+    $('result').hidden=true;
+    $('launch').disabled=false;
+    $('launch').innerHTML='Hold to charge <span>↗</span>';
+    $('status').textContent='READY TO DISMOUNT';
+    $('hint').textContent='HOLD OR DRAG ANYWHERE. RELEASE TO PUSH.';
+    $('power-value').textContent='—';
+    $('power-fill').style.width='0%';
+    $('power-help').textContent='Hold and release to push, or use two short clicks.';
+    $('replay').disabled=!frames.length;
+    lock(false);
+    updateReport();
+  }
   function launch(preset=null){
     unlockAudio();
     if(mode==='finished'){reset();return;}
@@ -434,7 +551,9 @@
     $('power-value').textContent=Math.round(power*100)+'%';
     $('power-fill').style.width=power*100+'%';
     runPush=preset?{part:preset.part,angle:preset.angle,power:preset.power}:{part:$('part').value,angle:Number($('angle').value),power};
-    pendingScore=null;mode='running';lock(true);frames=[sim.snapshot()];sim.push(runPush.part,runPush.angle,runPush.power);accumulator=0;
+    if(attemptCompleted&&frames.length){ghostFrames=frames;attemptCompleted=false;updateGhost();}
+    $('settings-drawer').hidden=true;$('settings-toggle').setAttribute('aria-expanded','false');
+    pendingScore=null;mode='running';lock(true);frames=new Recording();frames.push(sim.snapshot());sim.push(runPush.part,runPush.angle,runPush.power);accumulator=0;
     $('status').textContent='DISMOUNT IN PROGRESS';$('launch').textContent='Experiment in progress…';$('launch').disabled=true;$('hint').textContent='GRAVITY HAS TAKEN OVER.';$('power-help').textContent='Push locked. Watch the impacts accumulate.';
   }
   // Presentation-only randomness: never used by the simulation or replay recipes.
@@ -522,7 +641,7 @@
     return {title:nextJoke(category),quip:nextJoke('observations')+' '+nextJoke('verdicts')};
   }
   function finish(replaying=false){
-    if(!replaying)retryRecipe={...runPush,layout};
+    if(!replaying){retryRecipe={...runPush,layout,character};attemptCompleted=true;ghostFrames=frames;updateGhost();}
     else {replayPaused=true;updateReplayControls();}
     mode='finished';lock(true);$('launch').disabled=false;$('launch').innerHTML='New experiment <span>↗</span>';$('status').textContent='EXPERIMENT COMPLETE';$('replay').disabled=!frames.length;
     pendingScore=replaying?null:{push:{...runPush},score:current.score,hits:current.hits,time:current.time,steps:frames.length-1};
@@ -549,31 +668,36 @@
       }
       const cell=document.createElement('td'), button=document.createElement('button');
       button.type='button'; button.setAttribute('data-score-id',entry.id);
-      button.textContent=entry.engine===REPLAY_VERSION?'▷ Replay':'Unavailable';
-      button.disabled=!['ready','finished'].includes(mode)||entry.engine!==REPLAY_VERSION;
+      button.textContent=supportsReplay(entry)?'▷ Replay':'Unavailable';
+      button.disabled=!['ready','finished'].includes(mode)||!supportsReplay(entry);
       button.setAttribute('aria-label','Replay '+entry.nick+' — '+entry.score+' points');
-      if(entry.engine!==REPLAY_VERSION)button.title='Recorded with a different physics version.';
+      if(!supportsReplay(entry))button.title='Recorded with a different physics version.';
       cell.appendChild(button);row.appendChild(cell);$('score-rows').appendChild(row);
     });
     $('board-empty').hidden=board.entries.length>0;
     $('board-message').textContent=board.persistent?'Saved in this browser. Replay any recorded run.':'Browser storage unavailable. Scores last for this session only.';
   }
-  function startReplay(recording, label='', recipe=runPush) {
+  function revealStage() {
+    if(document.fullscreenElement||document.webkitFullscreenElement||$('game-panel').getAttribute('data-expanded')==='true')return;
+    $('game-panel').scrollIntoView?.({block:'start',behavior:window.matchMedia?.('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'});
+  }
+  function startReplay(recording, label='', recipe=runPush,engine=REPLAY_VERSION) {
+    revealStage();
     unlockAudio();noticeLife=0;$('impact-notice').hidden=true;replayPaused=false;peakFrame=0;let peakPoints=-1;
-    recording.forEach((frame,index)=>{for(const hit of frame.impacts||[])if(hit.points>peakPoints){peakPoints=hit.points;peakFrame=index;}});
+    peakFrame=recording.peakIndex;peakPoints=recording.peakPoints;
     $('replay-peak').disabled=peakPoints<0;
-    if(recipe)retryRecipe={...recipe,layout};
+    if(recipe)retryRecipe={...recipe,layout,character,engine};
     $('replay-controls').hidden=false;$('retry-settings').hidden=true;
     playbackFrames=recording;replayLabel=label;pendingScore=null;replayJob=null;
     camera=null;impactSlow=0;shake=0;impactCooldown=0;mode='replay';$('stage').setAttribute('data-finished','false');$('drop').disabled=true;
-    replayIndex=0;accumulator=0;particles=[];current=recording[0];lock(true);
+    replayIndex=0;accumulator=0;particles=[];current=recording.at(0);lock(true);
     $('result').hidden=true;$('score-entry').hidden=true;$('status').textContent='REPLAYING EXPERIMENT';
     $('launch').disabled=true;$('replay').disabled=true;updateReplayControls();updateReport();$('hint').textContent=label?'REPLAY / '+label:'REPLAY / RECORDED PHYSICS';
   }
   function updateReplayControls() {
     $('replay-timeline').max=Math.max(0,playbackFrames.length-1);
     $('replay-timeline').value=replayIndex;
-    $('replay-time').textContent=(playbackFrames[replayIndex]?.time||0).toFixed(2)+' / '+(playbackFrames.at(-1)?.time||0).toFixed(2)+' s · frame '+replayIndex;
+    $('replay-time').textContent=(playbackFrames.at(replayIndex)?.time||0).toFixed(2)+' / '+(playbackFrames.at(-1)?.time||0).toFixed(2)+' s · frame '+replayIndex;
     $('replay-toggle').textContent=replayPaused?'▶ Play':'Ⅱ Pause';
     $('replay-toggle').setAttribute('aria-pressed',String(!replayPaused));
     $('replay-back').disabled=replayIndex===0;
@@ -583,10 +707,10 @@
     if(!playbackFrames.length||$('replay-controls').hidden)return;
     mode='replay';replayPaused=true;camera=null;accumulator=0;impactSlow=0;shake=0;particles=[];noticeLife=0;$('impact-notice').hidden=true;
     replayIndex=Math.max(0,Math.min(playbackFrames.length-1,Math.round(Number(index)||0)));
-    current=playbackFrames[replayIndex];pendingScore=null;
+    current=playbackFrames.at(replayIndex);pendingScore=null;
     $('result').hidden=true;$('stage').setAttribute('data-finished','false');
     $('launch').disabled=true;$('status').textContent='REPLAY PAUSED';lock(true);
-    showFrameEvents(current,playbackFrames[replayIndex-1],false);
+    showFrameEvents(current,(replayIndex?playbackFrames.at(replayIndex-1):undefined),false);
     updateReport();updateReplayControls();
   }
   $('replay-timeline').addEventListener('input',()=>seekReplay($('replay-timeline').value));
@@ -606,7 +730,7 @@
   function prepareRetry(edit) {
     if(!retryRecipe||!['ready','finished','replay'].includes(mode))return;
     const recipe={...retryRecipe};
-    if(!edit&&(recipe.angle < -100 || recipe.angle > 100))return;
+    if(!edit&&(recipe.angle < -100 || recipe.angle > 100 || recipe.engine&&recipe.engine!==REPLAY_VERSION))return;
     reset();
     $('part').value=recipe.part;$('angle').value=String(edit?Math.max(-100,Math.min(100,recipe.angle)):recipe.angle);
     $('angle-value').textContent=$('angle').value+'°';power=recipe.power;presetPower=recipe.power;
@@ -634,19 +758,20 @@
       particles.push({...hit,life:1,label:kind+' +'+hit.points});
       $('impact-notice').textContent=(partLabels[hit.segment]||hit.group)+' · '+kind+' +'+hit.points;
       noticeLife=1.1;$('impact-notice').hidden=!injuryLabels;
-      if(audible){thud(hit);impactFeedback(hit);}
+      if(audible)impactFeedback(hit);
     }
     const broken=new Set((previous?.joints||[]).filter(j=>j.broken).map(j=>j.name));
     for(const j of frame.joints||[])if(j.broken&&!broken.has(j.name)) {
-      particles.push({x:j.x,y:j.y,life:1,kind:'joint',label:'DISLOCATION'});
-      $('impact-notice').textContent=j.name.replace(/([A-Z])/g,' $1')+' · DISLOCATION';
+      particles.push({x:j.x,y:j.y,life:1,kind:'joint',label:theme().event});
+      $('impact-notice').textContent=j.name.replace(/([A-Z])/g,' $1')+' · '+theme().event;
       noticeLife=1.1;$('impact-notice').hidden=!injuryLabels;
     }
-    if(audible)for(const event of frame.cracks||[])crack(event.strength,event.fracture);
+    if(audible)audioFx.queue(frame);
     particles=particles.slice(-32);
   }
   function buildReplayChunk() {
     const job=replayJob;
+    if(!job||job.worker)return;
     const started=window.performance?.now();
     for(let i=0;i<30&&job.steps<job.entry.steps;i++) {
       if(i>0&&started!==undefined&&window.performance.now()-started>=8)break;
@@ -655,21 +780,46 @@
     }
     $('status').textContent='PREPARING REPLAY · '+Math.round(job.steps/job.entry.steps*100)+'%';
     if(job.steps===job.entry.steps) {
-      const end=job.frames[job.frames.length-1];
-      if(end.score!==job.entry.score||end.hits!==job.entry.hits||Math.abs(end.time-job.entry.time)>1e-8) {
+      if(!validEnd(job.frames,job.entry)) {
         reset();$('board-message').textContent='This replay cannot be reproduced in this browser.';return;
       }
-      startReplay(job.frames,job.entry.nick,job.entry.push);
+      replayCache={key:replayKey(job.entry),frames:job.frames};
+      startReplay(job.frames,job.entry.nick,job.entry.push,job.entry.engine);
     }
   }
   $('score-rows').addEventListener('click',event=>{
     const button=event.target.closest('button[data-score-id]');
     if(!button||!['ready','finished'].includes(mode))return;
     const entry=board.get(button.getAttribute('data-score-id'));
-    if(!entry||entry.engine!==REPLAY_VERSION)return;
-    unlockAudio();const replaySim=new Simulation(entry.layout||'classic');
-    replayJob={entry,sim:replaySim,frames:[replaySim.snapshot()],steps:0};
-    replaySim.push(entry.push.part,entry.push.angle,entry.push.power);
+    if(!entry||!supportsReplay(entry))return;
+    revealStage();unlockAudio();
+    if(replayCache?.key===replayKey(entry)){startReplay(replayCache.frames,entry.nick,entry.push,entry.engine);return;}
+    replayJob={entry,worker:null};
+    const job=replayJob;
+    const fallback=()=>{
+      job.worker?.terminate();job.worker=null;
+      if(replayJob!==job)return;
+      job.sim=new Simulation(entry.layout||'classic',entry.character||'human',entry.engine);
+      job.frames=new Recording();job.frames.push(job.sim.snapshot());job.steps=0;
+      job.sim.push(entry.push.part,entry.push.angle,entry.push.power);
+    };
+    try {
+      if(!window.Worker||window.location?.protocol==='file:')fallback();
+      else {
+        job.worker=new window.Worker('src/replay-worker.js');
+        job.worker.onmessage=({data})=>{
+          if(replayJob!==job)return;
+          if(data.error){fallback();return;}
+          if(data.recording) {
+            const recording=Recording.from(data.recording);job.worker.terminate();
+            if(!validEnd(recording,entry)){reset();$('board-message').textContent='This replay cannot be reproduced in this browser.';return;}
+            replayCache={key:replayKey(entry),frames:recording};startReplay(recording,entry.nick,entry.push,entry.engine);
+          }else $('status').textContent='PREPARING REPLAY · '+Math.round(data.progress*100)+'%';
+        };
+        job.worker.onerror=event=>{event.preventDefault?.();fallback();};
+        job.worker.postMessage(entry);
+      }
+    }catch(_){fallback();}
     mode='loadingReplay';$('replay-controls').hidden=true;pendingScore=null;lock(true);$('result').hidden=true;
     $('stage').setAttribute('data-finished','false');$('drop').disabled=true;
     $('launch').disabled=true;$('replay').disabled=true;
@@ -685,111 +835,6 @@
     pendingScore=null;$('score-entry').hidden=true;renderBoard();
     $('save-message').textContent=result.persistent?'Saved as '+nick+'.':'Saved for this session only; browser storage is unavailable.';
   });
-  // Audio is created inside a user gesture to satisfy browser autoplay rules.
-  function unlockAudio() {
-    if (!sound) return;
-    try {
-      if (!audio || audio.state==='closed') {
-        audio = new (window.AudioContext || window.webkitAudioContext)();
-        master = audio.createGain();
-        master.gain.value = 0.65;
-        const compressor = audio.createDynamicsCompressor();
-        compressor.threshold.value = -14;
-        compressor.knee.value = 18;
-        compressor.ratio.value = 5;
-        compressor.attack.value = 0.003;
-        compressor.release.value = 0.18;
-        master.connect(compressor);
-        compressor.connect(audio.destination);
-        audio.addEventListener?.('statechange',()=>updateSoundControls());
-        // Start a silent source inside the gesture, including Safari's first unlock.
-        const silent=audio.createBufferSource();
-        silent.buffer=audio.createBuffer(1,1,audio.sampleRate);
-        silent.connect(master);silent.onended=()=>silent.disconnect();silent.start();
-      }
-      if (audio.state==='suspended'||audio.state==='interrupted') {
-        audio.resume().then(()=>updateSoundControls()).catch(()=>{
-          if(sound)updateSoundControls('SOUND: TAP TO ENABLE');
-        });
-      }
-    } catch (_) { sound = false; updateSoundControls('SOUND UNAVAILABLE'); }
-  }
-  function tone(start, end, duration, volume, type = 'sine') {
-    if (!sound || !audio || !master) return;
-    const osc = audio.createOscillator(), gain = audio.createGain(), now = audio.currentTime;
-    osc.type = type;
-    osc.frequency.setValueAtTime(start, now);
-    osc.frequency.exponentialRampToValueAtTime(end, now + duration);
-    gain.gain.setValueAtTime(volume, now);
-    gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
-    osc.connect(gain); gain.connect(master);
-    osc.onended = () => { osc.disconnect(); gain.disconnect(); };
-    osc.start(); osc.stop(now + duration + 0.01);
-  }
-  function noise(kind, variant, duration, volume, frequency, filterType = 'lowpass', rate = 1) {
-    if (!sound || !audio || !master) return;
-    const key = kind + variant;
-    if (!noiseBuffers.has(key)) {
-      const buffer = audio.createBuffer(1, Math.ceil(audio.sampleRate * 0.4), audio.sampleRate);
-      const samples = buffer.getChannelData(0);
-      // Seeded textures: each recorded impact keeps its timbre on replay.
-      let seed = 7919 + variant * 104729, low = 0;
-      for (let i = 0; i < samples.length; i++) {
-        seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
-        const white = seed / 2147483648 - 1, t = i / audio.sampleRate;
-        low = low * 0.82 + white * 0.18;
-        let envelope = Math.exp(-t * 26);
-        if (kind === 'snap') {
-          envelope = Math.exp(-t * 190);
-          for (let burst = 1; burst <= 2 + variant % 3; burst++) {
-            const start = burst * (0.014 + variant * 0.002);
-            if (t > start) envelope += (0.7 / burst) * Math.exp(-(t-start)*210);
-          }
-        }
-        samples[i] = (kind === 'body' ? low * 2 : white) * envelope;
-      }
-      noiseBuffers.set(key, buffer);
-    }
-    const source = audio.createBufferSource(), filter = audio.createBiquadFilter(), gain = audio.createGain();
-    source.buffer = noiseBuffers.get(key);
-    source.playbackRate.value = rate;
-    filter.type = filterType; filter.frequency.value = frequency; filter.Q.value = 0.7;
-    gain.gain.setValueAtTime(volume, audio.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, audio.currentTime + duration);
-    source.connect(filter); filter.connect(gain); gain.connect(master);
-    source.onended = () => { source.disconnect(); filter.disconnect(); gain.disconnect(); };
-    source.start(); source.stop(audio.currentTime + duration);
-  }
-  function thud(hit) {
-    if (!sound || !audio || audio.currentTime - lastThud < 0.045) return;
-    lastThud = audio.currentTime;
-    const {force, edge, group = 'Torso', variant = 0} = hit;
-    const weight = Math.min(1, force / 850), pitch = 0.86 + variant * 0.055;
-    const base = {Head:190, Torso:85, Arms:240, Legs:125}[group] || 125;
-    // Torso: low thump; head: hollow knock; limbs: shorter, harder taps.
-    tone(base*pitch, (group==='Torso'?28:55)*pitch,
-      0.075 + weight*0.14, 0.035 + weight*0.16, group==='Head'?'sine':'triangle');
-    noise('body', variant, 0.09+weight*0.13, 0.09+weight*0.25,
-      group==='Torso'?650:group==='Head'?1700:2600, 'lowpass', pitch);
-    if (edge) {
-      noise('snap', variant, 0.07, 0.12+weight*0.2, 1800, 'highpass', pitch*1.25);
-      tone(750*pitch, 170, 0.035, 0.035+weight*0.04, 'triangle');
-    } else if (force > 350) {
-      // Short gritty tail on heavier flat landings.
-      noise('grit', variant, 0.16, weight*0.09, 2400, 'bandpass', 0.8);
-    }
-  }
-  function crack(strength, fracture = false) {
-    if (!sound || !audio || !master || (!fracture && audio.currentTime - lastCrack < 0.09)) return;
-    lastCrack = audio.currentTime;
-    const variant = soundVariant++ % 6;
-    noise('snap', variant, fracture?0.23:0.12, 0.12+strength*0.22,
-      fracture?850:1600, 'highpass', 0.85+variant*0.07);
-    if (fracture) {
-      tone(140+variant*17, 32, 0.18, 0.1, 'triangle');
-      noise('body', variant, 0.2, 0.16, 900);
-    }
-  }
   function cancelDrag() {
     if (!drag) return;
     const pointerId = drag.id;
@@ -818,7 +863,6 @@
     fpsLast=now;
   }
   function tick(now){
-    updateFps(now);
     const delta=last?Math.min((now-last)/1000,.05):0;last=now;renderDelta=delta;
     impactSlow=Math.max(0,impactSlow-delta);impactCooldown=Math.max(0,impactCooldown-delta);shake=Math.max(0,shake-delta);
     if (drag) drag.held += delta;
@@ -833,7 +877,7 @@
           showFrameEvents(current,previous);
           if(!sim.active)finish();
         }else{
-          replayIndex=Math.min(replayIndex+1,playbackFrames.length-1);current=playbackFrames[replayIndex];
+          replayIndex=Math.min(replayIndex+1,playbackFrames.length-1);current=playbackFrames.at(replayIndex);
           showFrameEvents(current,previous);
           if(replayIndex>=playbackFrames.length-1)finish(true);
         }
@@ -846,7 +890,10 @@
       particles.forEach(p=>{p.life-=delta;});particles=particles.filter(p=>p.life>0);
       noticeLife=Math.max(0,noticeLife-delta);if(!noticeLife)$('impact-notice').hidden=true;
     }
-    render();requestAnimationFrame(tick);
+    audioFx.flush();
+    const moving=['running','charging','aiming'].includes(mode)||(mode==='replay'&&!replayPaused)||particles.length||shake>0;
+    if(!document.hidden&&(moving||now-lastDraw>=100)){render();updateFps(now);lastDraw=now;}
+    requestAnimationFrame(tick);
   }
   function cancelLaunchPress() {
     if (!launchPress) return;
@@ -887,66 +934,7 @@
     if (suppress && event.detail !== 0) return;
     launch();
   });
-  let expandedView=false, fullscreenPending=false, expandedRestore=null;
-  const nativeFullscreenElement=()=>document.fullscreenElement||document.webkitFullscreenElement;
-  function updateFullscreenButton() {
-    const active=expandedView||nativeFullscreenElement()===$('game-panel');
-    $('fullscreen').textContent=active?'EXIT FULLSCREEN':'FULLSCREEN';
-    $('fullscreen').setAttribute('aria-pressed',String(active));
-    $('fullscreen').disabled=fullscreenPending;
-  }
-  function setExpandedView(active) {
-    if(expandedView===active)return;
-    expandedView=active;
-    $('game-panel').setAttribute('data-expanded',String(active));
-    if(active) {
-      const body=document.body;
-      expandedRestore={x:window.scrollX||0,y:window.scrollY||0,
-        style:{position:body.style.position,top:body.style.top,width:body.style.width,overflow:body.style.overflow},
-        siblings:Array.from(document.querySelectorAll('header, .workspace > aside, .workspace > .injury-report, .highscores, main > footer')).map(node=>[node,node.inert])};
-      body.style.position='fixed';body.style.top=-expandedRestore.y+'px';body.style.width='100%';body.style.overflow='hidden';
-      for(const [node] of expandedRestore.siblings)node.inert=true;
-    } else {
-      Object.assign(document.body.style,expandedRestore.style);
-      for(const [node,inert] of expandedRestore.siblings)node.inert=inert;
-      window.scrollTo?.(expandedRestore.x,expandedRestore.y);expandedRestore=null;
-    }
-    updateFullscreenButton();camera=null;resize();$('fullscreen').focus?.();
-  }
-  $('fullscreen').disabled=false;
-  $('fullscreen').addEventListener('click',async()=>{
-    if(fullscreenPending)return;
-    if(expandedView){setExpandedView(false);return;}
-    fullscreenPending=true;updateFullscreenButton();
-    const panel=$('game-panel'),active=nativeFullscreenElement()===panel;
-    try {
-      if(active) {
-        const leave=document.exitFullscreen||document.webkitExitFullscreen;
-        if(leave)await leave.call(document);
-      } else {
-        const enter=panel.requestFullscreen||panel.webkitRequestFullscreen;
-        if(!enter||document.fullscreenEnabled===false) setExpandedView(true);
-        else await enter.call(panel);
-      }
-      $('fullscreen').title=expandedView?'Full-window view; browser controls may remain visible.':'';
-    } catch (_) {
-      if(!active) {
-        setExpandedView(true);
-        $('fullscreen').title='Full-window view; browser controls may remain visible.';
-      } else $('fullscreen').title='Use the browser fullscreen exit control to leave.';
-    } finally { fullscreenPending=false;updateFullscreenButton();camera=null;resize(); }
-  });
-  const fullscreenChanged=()=>{updateFullscreenButton();camera=null;resize();};
-  document.addEventListener('fullscreenchange',fullscreenChanged);
-  document.addEventListener('webkitfullscreenchange',fullscreenChanged);
-  document.addEventListener('keydown',event=>{
-    if(event.key==='Escape'&&expandedView){event.preventDefault();setExpandedView(false);}
-  });
-  window.addEventListener('resize',()=>{
-    if(drag||launchPress)reset();
-    camera=null;resize();
-  });
-  window.visualViewport?.addEventListener('resize',()=>{camera=null;resize();});
+  window.DismountFullscreen.attach({host:window,document,$,resize:()=>{camera=null;resize();},cancelGesture:()=>{if(drag||launchPress)reset();}});
   $('stage-reset').addEventListener('click',reset);
   $('reset').addEventListener('click',reset);$('again').addEventListener('click',reset);
   $('stage').addEventListener('click', event => {
@@ -963,21 +951,16 @@
   $('slow').addEventListener('click',()=>{slow=!slow;$('slow').setAttribute('aria-pressed',String(slow));});
   $('view').addEventListener('click',()=>{perspective=!perspective;$('view').textContent='VIEW: '+(perspective?'PERSPECTIVE':'SIDE');});
   $('replay').addEventListener('click',()=>{if(frames.length&&(mode==='ready'||mode==='finished'))startReplay(frames);});
-  function updateSoundControls(label=!sound?'SOUND OFF':audio&&audio.state!=='running'?'SOUND: TAP TO ENABLE':'SOUND ON') {
+  function updateSoundControls(label=audioFx.label) {
     for(const id of ['sound','stage-sound']) {
-      $(id).textContent=label;$(id).setAttribute('aria-pressed',String(sound));
+      $(id).textContent=label;$(id).setAttribute('aria-pressed',String(audioFx.enabled));
     }
   }
-  function toggleSound() {
-    const needsResume=sound&&audio&&audio.state!=='running';
-    if(!needsResume)sound=!sound;
-    updateSoundControls();
-    if(sound)unlockAudio();
-    if(master)master.gain.value=sound?.65:0;
-    tone(600,900,.1,.04);
-  }
-  $('sound').addEventListener('click',toggleSound);
-  $('stage-sound').addEventListener('click',toggleSound);
+  $('sound').addEventListener('click',()=>audioFx.toggle());
+  $('stage-sound').addEventListener('click',()=>audioFx.toggle());
+  $('volume').value=String(Math.round(audioFx.volume*100));
+  $('volume-value').textContent=$('volume').value+'%';
+  $('volume').addEventListener('input',()=>{audioFx.setVolume(Number($('volume').value)/100);$('volume-value').textContent=$('volume').value+'%';});
   document.addEventListener('keydown',event=>{if($('welcome').open)return;if(event.repeat||event.ctrlKey||event.metaKey||event.altKey)return;if(['INPUT','SELECT','BUTTON'].includes(event.target.tagName))return;if(event.code==='Space'){event.preventDefault();launch();}if(event.code==='KeyR')reset();});
   canvas.addEventListener('pointerdown', event => {
     if (mode !== 'ready' || event.button !== 0 || event.isPrimary===false || drag) return;
@@ -1020,7 +1003,7 @@
   canvas.addEventListener('pointermove', updateMouseAim);
   function releaseMouseAim(event) {
     // Touch release is an activation gesture on Safari, unlike some pointer-down events.
-    if(sound&&audio&&audio.state!=='running')unlockAudio();
+    if(audioFx.needsResume)unlockAudio();
     if (!drag || event.pointerId !== drag.id) return;
     // Release may carry a newer position than the last pointermove event.
     updateMouseAim(event);
@@ -1044,5 +1027,5 @@
   // Losing capture is not a cancellation: retain the gesture until global release.
   // Only pointercancel, reset, or leaving the window cancels an unfinished gesture.
   window.addEventListener('blur', () => { if (drag || launchPress) reset(); });
-  reset();resize();if(!linkedChamber)$('welcome').showModal?.();requestAnimationFrame(tick);
+  reset();resize();if(!linkedChamber&&!linkedCharacter)$('welcome').showModal?.();requestAnimationFrame(tick);
 })();

@@ -304,7 +304,7 @@ test('run statistics measure airborne center-of-mass motion and reset cleanly',(
   assert.ok(Math.abs(s.stats.maxSpeed-GRAVITY*20*DT)<.05);
   assert.ok(s.stats.distance>.1&&s.stats.distance<.2);
   const frame=s.snapshot();s.reset();
-  assert.deepEqual(s.stats,{steps:0,distance:0,maxSpeed:0,airtime:0});
+  assert.deepEqual(s.stats,{steps:0,distance:0,maxSpeed:0,airtime:0,maxFlightSteps:0});
   assert.ok(frame.stats.distance>.1);
 });
 
@@ -329,4 +329,14 @@ test('every healthy and dislocated joint resists rotation in both directions',()
       assert.ok(Math.hypot(a.x-b.x,a.y-b.y)<.03,`${name}: body remains attached`);
     }
   }
+});
+
+test('strong hand pushes stabilize wrists while legacy replay integration stays reproducible',()=>{
+  const current=new Simulation(),legacy=new Simulation('classic','human','rigid-2.2.0');
+  current.push('leftHand',90,1);legacy.push('leftHand',90,1);current.step();legacy.step();
+  const wrist=current.joints.find(j=>j.name==='leftWrist');
+  assert.ok(current.jointAngle(wrist)<=wrist.hinge.getUpperLimit()+6*Math.PI/180);
+  // Published 2.2 output: retaining it matters for existing saved recipes.
+  const oldWrist=legacy.joints.find(j=>j.name==='leftWrist');
+  assert.ok(Math.abs(legacy.jointAngle(oldWrist)*180/Math.PI-72.25901182430357)<1e-9);
 });
