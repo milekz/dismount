@@ -96,3 +96,16 @@ test('historical rankings stay available without competing with or being overwri
     assert.equal(restored.entries[0].nick,'NEW');assert.equal(restored.previousEntries[0].nick,'OLD');
   }
 });
+
+test('both earlier ranking generations survive a new scoring board',()=>{
+  const {PREVIOUS_KEYS}=require('../src/scores.js'),storage=memory(),source=new ScoreBoard(storage,'test');
+  source.save('OLD',run(500));const base=source.entries[0];
+  for(const [i,key] of PREVIOUS_KEYS.entries())
+    storage.setItem(key,JSON.stringify({version:1,entries:[{...base,id:'archive-'+i,engine:i?'rigid-2.3.0':'rigid-3.0.0'}]}));
+  storage.setItem(KEY,'');
+  const originals=PREVIOUS_KEYS.map(key=>storage.getItem(key)),board=new ScoreBoard(storage,'rigid-3.1.0');
+  assert.equal(board.previousEntries.length,2);assert.equal(board.entries.length,0);
+  board.save('NEW',run(600));
+  assert.deepEqual(PREVIOUS_KEYS.map(key=>storage.getItem(key)),originals);
+  assert.equal(new ScoreBoard(storage,'rigid-3.1.0').previousEntries.length,2);
+});

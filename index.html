@@ -18,6 +18,7 @@
   <script defer src="src/challenges.js"></script>
   <script defer src="src/fullscreen.js"></script>
   <script defer src="src/endless.js"></script>
+  <script defer src="src/shadow.js"></script>
   <script defer src="src/game.js"></script>
 </head>
 <body>
@@ -28,13 +29,13 @@
     <div class="workspace">
       <div id="game-panel" class="stage-column"><section id="stage" class="arena" aria-label="Stair dismount simulation">
         <div class="arena-top"><span><span class="live-dot"></span> <span id="status">READY TO DISMOUNT</span></span><div class="arena-top-actions"><span id="fps" title="Rendered frames per second" aria-label="Frames per second">— FPS</span><span id="chamber-number">TEST CHAMBER / 07</span><button id="stage-reset" class="small-button" type="button" title="Stop the round or replay and reset the character">RESET</button></div></div>
-        <div class="scoreboard"><p>IMPACT SCORE</p><strong id="score">000000</strong><span>PERSONAL BEST <b id="best">0</b></span></div>
+        <div class="scoreboard"><p>TOTAL SCORE</p><strong id="score">000000</strong><span id="score-breakdown" title="Progress earns 10 points per new step or ledge, capped at 20% of damage points.">DAMAGE 0 + PROGRESS 0</span><span>PERSONAL BEST <b id="best">0</b></span></div>
         <div id="challenge-status" class="challenge-status" hidden></div><div id="impact-notice" class="impact-notice" hidden></div>
         <div id="endless-progress" class="endless-progress" hidden><span id="endless-zone">SUBLEVEL 01 · ATRIUM</span><strong id="endless-depth">0 STEPS ↓</strong><span id="endless-next">NEXT 50 · BEST 0</span></div>
         <div id="endless-milestone" class="endless-milestone" role="status" aria-live="polite" hidden><strong id="endless-milestone-title"></strong><span id="endless-milestone-joke"></span></div>
         <canvas id="game" aria-label="Ragdoll in a test chamber. Select push settings and press Dismount."></canvas>
         <div class="scene-label"><span id="layout-caption">ENDLESS STAIRS · 120 s MAX</span> <span>·</span> 9.81 m/s² <span>·</span> ZERO REGRETS</div>
-        <div id="result" class="result" hidden><p id="result-outcome">EXPERIMENT COMPLETE</p><h2 id="result-title">A solid landing.</h2><p id="result-quip" class="result-quip"></p><p id="result-detail"></p><form id="score-entry" hidden>
+        <div id="result" class="result" hidden><p id="result-outcome">EXPERIMENT COMPLETE</p><h2 id="result-title">A solid landing.</h2><p id="result-quip" class="result-quip"></p><p id="result-detail"></p><p id="result-score-breakdown"></p><form id="score-entry" hidden>
           <label for="initials">TOP 10 — ENTER YOUR INITIALS</label>
           <div class="initials-row"><input id="initials" name="initials" type="text" maxlength="3" minlength="3" pattern="[A-Za-z]{3}" autocomplete="off" autocapitalize="characters" spellcheck="false" required placeholder="AAA" aria-label="Three-letter initials"><button id="save-score" type="submit">Save score</button></div>
         </form><p id="save-message" role="status"></p><button id="again">Try another push ↗</button><p>OR CLICK ANYWHERE ON THE STAGE</p></div>
@@ -68,11 +69,12 @@
     <section class="highscores" aria-labelledby="highscores-title">
       <div class="section-title"><h2 id="highscores-title">High scores · Endless Stairs</h2><span>LOCAL TOP 10</span></div>
       <p id="board-message" class="help" role="status">Saved in this browser. Replay any recorded run.</p>
+      <p class="help">Total = damage + progress. Each new step or ledge earns 10 points, capped at 20% of damage points.</p>
       <table class="score-table"><caption class="sr-only">Ten best dismounts with three-letter initials and replays</caption><thead><tr><th scope="col">RANK</th><th scope="col">NAME</th><th scope="col">SCORE</th><th scope="col">REPLAY</th></tr></thead><tbody id="score-rows"></tbody></table>
       <p id="board-empty" class="help">No scores yet. Finish a run and add your initials.</p>
       <details id="previous-scores" hidden>
         <summary>Previous records &amp; replays</summary>
-        <p class="help">Recorded before the physics update. Kept separately so the new rankings stay comparable.</p>
+        <p class="help">Recorded with earlier physics or scoring rules. Kept separately so the new rankings stay comparable.</p>
         <table class="score-table"><caption class="sr-only">Previous records and their saved replays</caption><thead><tr><th scope="col">RANK</th><th scope="col">NAME</th><th scope="col">SCORE</th><th scope="col">REPLAY</th></tr></thead><tbody id="previous-score-rows"></tbody></table>
       </details>
     </section>

@@ -28,7 +28,7 @@
   try { injuryLabels=storage?.getItem('dismount-injury-labels')!=='off'; } catch (_) { /* Optional preference. */ }
   const motionEnabled=()=>motion&&layout!=='endless';
   let camera=null, renderDelta=0, impactSlow=0, impactCooldown=0, shake=0;
-  const bestKey=()=>(layout==='classic'?'dismount-anatomy-best-v3':'dismount-anatomy-best-v3-'+layout)+(character==='human'?'':'-character-'+character);
+  const bestKey=()=>(layout==='classic'?'dismount-anatomy-best-v4':'dismount-anatomy-best-v4-'+layout)+(character==='human'?'':'-character-'+character);
   let replayCache=null,ghostFrames=null,ghostEnabled=false,attemptCompleted=false,challenge='none';
   const {themes}=window.DismountSubjects;
   const {goals,evaluate}=window.DismountChallenges;
@@ -200,8 +200,7 @@
     }
     const characterId=current.character||'human';
     const pts=current.points;
-    const center=pts[2],ground=center.x<220?205:stair.kind==='shaft'?(stair.ledges.find(t=>center.x>=t.x&&center.x<=t.x+t.width&&t.y>=center.y)?.y||stair.floor):(stair.treads.find(t=>center.x<t.x+t.width)?.y||stair.floor);
-    ctx.save();ctx.globalAlpha=.13;ctx.fillStyle='#3f5032';ctx.beginPath();ctx.ellipse(center.x,ground,50,7,0,0,Math.PI*2);ctx.fill();ctx.restore();
+    window.DismountShadow.draw(ctx,stair,pts[2],depthX,depthY);
     // Clothing and tapered silhouettes follow each rigid body's endpoints.
     // Render directly from the skeleton so proportions and collision shapes agree.
     const drawOrder = ['neckLink','leftUpperArm','leftForearm','leftHand','leftThigh','leftShin','leftFoot',
@@ -293,7 +292,7 @@
       const selected=sim.points.findIndex(p=>p.name===$('part').value),p=pts[selected],angle=Number($('angle').value)*Math.PI/180;
       ctx.strokeStyle='#e75b32';ctx.lineWidth=2;ctx.setLineDash([4,4]);ctx.beginPath();ctx.arc(p.x,p.y,23,0,Math.PI*2);ctx.stroke();ctx.setLineDash([]);
       const arrowColor=`hsl(${120*(1-Math.max(0,Math.min(1,power)))} 80% 42%)`;
-      const arrowLength=drag?40+power*160:80;
+      const arrowLength=40+power*160;
       const start={x:p.x-arrowLength*Math.cos(angle),y:p.y+arrowLength*Math.sin(angle)},end={x:p.x-28*Math.cos(angle),y:p.y+28*Math.sin(angle)};
       line(start,end,arrowColor,3);
       polygon([[end.x,end.y],[end.x-13*Math.cos(angle-.45),end.y+13*Math.sin(angle-.45)],[end.x-13*Math.cos(angle+.45),end.y+13*Math.sin(angle+.45)]],arrowColor);
@@ -308,6 +307,7 @@
     }
     ctx.globalAlpha=1;ctx.restore();
   }
+  const damagePoints=()=>groups.reduce((sum,group)=>sum+current.damage[group],0);
   function updateReport() {
     const stats=current.stats||{steps:0,distance:0,maxSpeed:0,airtime:0};
     $('stat-steps-label').textContent=(current.layout||layout)==='shaft'?'Ledges passed':'Steps passed';
@@ -317,6 +317,8 @@
     reportText('stat-airtime',stats.airtime.toFixed(2)+' s');
     updateInjuryMap();updateChallenge();updateEndlessProgress();
     reportText('score',String(current.score).padStart(6,'0'));
+    const damage=damagePoints(),progress=current.score-damage;
+    reportText('score-breakdown','DAMAGE '+damage.toLocaleString()+' + PROGRESS '+progress.toLocaleString());
     $('injuries').textContent=(current.joints||[]).filter(joint=>joint.broken).length+' / '+current.joints.length;
     $('hits').textContent=current.hits+' HITS';$('elapsed').textContent=current.time.toFixed(2)+' s';
     for(const group of groups){$('value-'+group).textContent=current.damage[group].toLocaleString();$('bar-'+group).style.width=Math.min(100,current.damage[group]/80)+'%';}
@@ -362,7 +364,7 @@
     const body=current.segments.find(s=>s.name===selectedBody);
     if(!body)return;
     const joints=current.joints.filter(j=>j.parent===selectedBody||j.child===selectedBody);
-    setRecoveryMeter('recovery-overall',recoveryChance(current.score,current.joints,true));
+    setRecoveryMeter('recovery-overall',recoveryChance(damagePoints(),current.joints,true));
     setRecoveryMeter('recovery-part',recoveryChance(body.damage,joints));
     const label=j=>j.name.replace(/([A-Z])/g,' $1').toLowerCase();
     $('body-detail-title').textContent=partLabels[selectedBody];
@@ -700,6 +702,8 @@
     $('result-title').textContent=replaying?(replayLabel?'Replay · '+replayLabel:'Replay complete.'):description.title;
     $('result-quip').textContent=replaying?'Same stairs. Same decisions. Still somehow surprising.':description.quip;
     $('result-detail').textContent=`${current.score.toLocaleString()} points · ${current.hits} impacts · ${current.time.toFixed(2)} seconds`;
+    const damage=damagePoints(),progress=current.score-damage;
+    $('result-score-breakdown').textContent=`Damage ${damage.toLocaleString()} + Progress ${progress.toLocaleString()} = ${current.score.toLocaleString()}`;
     tone(440,880,.25,.06);
     $('stage').setAttribute('data-finished','true');
     updateReport();

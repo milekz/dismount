@@ -10,7 +10,7 @@
   const { Vec2, World, Box, Circle, RevoluteJoint, PrismaticJoint } = pl;
   const DT = 1 / 120, SUBSTEPS = 12, H = DT / SUBSTEPS, PPM = 70;
   const GRAVITY = 9.81, RAD = Math.PI / 180;
-  const REPLAY_VERSION='rigid-3.0.0';
+  const REPLAY_VERSION='rigid-3.1.0';
   const stair = { start: 220, top: 205, width: 48, rise: 31, count: 14, end: 892, floor: 639 };
   const LAYOUTS = {
     endless:{name:'Endless Stairs',count:24,width:48,rise:31,kind:'endless'},
@@ -48,7 +48,8 @@
   class Simulation {
     constructor(layout='classic',character='human',engine=REPLAY_VERSION) {
       if(legacy.supportsReplay({engine,character}))return new legacy.Simulation(layout,character,engine);
-      if(engine!==REPLAY_VERSION)throw new Error('Unsupported physics version: '+engine);
+      if(engine!==REPLAY_VERSION&&engine!=='rigid-3.0.0')throw new Error('Unsupported physics version: '+engine);
+      this.progressScoring=engine!=='rigid-3.0.0';
       this.layout=Object.hasOwn(LAYOUTS,layout)?layout:'classic';
       this.character=Object.hasOwn(CHARACTERS,character)?character:'human';
       this.profile=CHARACTERS[this.character];this.stair=buildStair(this.layout);this.reset();
@@ -59,6 +60,7 @@
       this.world.setContinuousPhysics(true);
       this.bodies = []; this.bodyByName = {}; this.joints = [];
       this.time = 0; this.score = 0; this.hits = 0; this.active = false; this.settled = 0;
+      this.impactScore=0;this.progressScore=0;
       this.damage = {Head:0,Torso:0,Arms:0,Legs:0}; this.impacts = []; this.cracks = [];
       this.strongestImpact = null;
       this.pendingPush = null; this.contactData = new WeakMap(); this.pendingImpacts = new Map();
@@ -327,7 +329,7 @@
         const force=impact*severity*(hit.self?0.65:1);
         const points=Math.max(0,Math.round((impact-50)*(s.group==='Head'?2.8:1.4)*severity*(hit.self?0.65:1)));
         s.damage+=points;s.hits++;
-        this.score+=points;this.damage[s.group]+=points;this.hits++;s.cooldown=0.18;s.flash=1;
+        this.impactScore+=points;this.damage[s.group]+=points;this.hits++;s.cooldown=0.18;s.flash=1;
         this.damageJoints(s,force);
         const event={self:hit.self,segment:s.name,x:hit.position.x*PPM,y:hit.position.y*PPM,points,force,
           group:s.group,variant:this.hits%6,edge:hit.edgeFactor>0.5};
@@ -335,6 +337,12 @@
         if(!this.strongestImpact||points>this.strongestImpact.points)this.strongestImpact={...event};
         if (force>280) this.cracks.push({strength:Math.min(1,force/800),variant:this.hits%6});
       }
+      this.updateScore();
+    }
+    updateScore() {
+      // Count furthest progress once. Old recipes retain impact-only scoring.
+      this.progressScore=this.progressScoring?Math.min(this.stats.steps*10,Math.floor(this.impactScore/5)):0;
+      this.score=this.impactScore+this.progressScore;
     }
     massCenter() {
       let x=0,y=0,vx=0,vy=0,mass=0;
@@ -367,6 +375,7 @@
         this.stats.maxFlightSteps=Math.max(this.stats.maxFlightSteps,passed-this.flightStart);
         if(grounded)this.flightStart=null;
       }
+      this.updateScore();
     }
     step() {
       if (!this.active) return;
@@ -410,6 +419,6 @@
     }
   }
   root.DismountPhysics={Simulation,stair,LAYOUTS,CHARACTERS,buildStair,DT,PPM,GRAVITY,REPLAY_VERSION,
-    supportsReplay:entry=>entry.engine===REPLAY_VERSION||legacy.supportsReplay(entry)};
+    supportsReplay:entry=>entry.engine===REPLAY_VERSION||entry.engine==='rigid-3.0.0'||legacy.supportsReplay(entry)};
   if (typeof module!=='undefined') module.exports=root.DismountPhysics;
 })(typeof window!=='undefined'?window:globalThis);

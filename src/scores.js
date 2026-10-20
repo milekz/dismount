@@ -1,7 +1,8 @@
 /* Small, versioned replay recipes: exact inputs, not rounded display values. */
 (function (root) {
   'use strict';
-  const KEY = 'dismount-scoreboard-v3', PREVIOUS_KEY='dismount-scoreboard-v2', LIMIT = 10;
+  const KEY = 'dismount-scoreboard-v4', PREVIOUS_KEY='dismount-scoreboard-v3',
+    PREVIOUS_KEYS=[PREVIOUS_KEY,'dismount-scoreboard-v2'], LIMIT = 10;
   const CHARACTERS=['human','robot','knight','skeleton','inflatable'];
   const PARTS = ['head','chest','hip','leftKnee','rightKnee','leftHand','rightHand','leftFoot','rightFoot'];
   const normalizeNick = value => String(value).toUpperCase().replace(/[^A-Z]/g,'').slice(0,3);
@@ -27,7 +28,10 @@
       const suffix=(layout==='classic'?'':'-'+layout)+(this.character==='human'?'':'-character-'+this.character);
       this.key=KEY+suffix;
       this.storage = storage; this.engine = engine; this.entries = []; this.persistent = true;
-      this.previousEntries=this.read(PREVIOUS_KEY+suffix);
+      const seen=new Set();
+      this.previousEntries=PREVIOUS_KEYS.flatMap(key=>this.read(key+suffix)).filter(entry=>{
+        if(seen.has(entry.id))return false;seen.add(entry.id);return true;
+      }).sort((a,b)=>b.score-a.score||a.savedAt-b.savedAt);
       this.entries=this.read(this.key);
     }
     read(key) {
@@ -71,7 +75,7 @@
     }
     get(id) { return this.entries.find(entry=>entry.id===id)||this.previousEntries.find(entry=>entry.id===id); }
   }
-  const api = {ScoreBoard,normalizeNick,validEntry,KEY,PREVIOUS_KEY,LIMIT};
+  const api = {ScoreBoard,normalizeNick,validEntry,KEY,PREVIOUS_KEY,PREVIOUS_KEYS,LIMIT};
   root.DismountScores=api;
   if (typeof module!=='undefined') module.exports=api;
 })(typeof window!=='undefined'?window:globalThis);

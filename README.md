@@ -14,7 +14,7 @@ python3 -m http.server 8000 --bind 127.0.0.1
 
 Then visit `http://localhost:8000`.
 
-**Mouse controls:** press anywhere on the stage. Hold still to charge the power meter, or drag right toward the stairs to set power by distance and adjust the angle. Release to push; release is handled even outside the canvas. Starting on empty space uses the currently selected body part; starting on the dummy selects the nearby body part. Drag up/down to aim and farther for more power (180 pixels = full power). The push arrow changes smoothly from green at low power through yellow to red at full power, during both dragging and charging. A short click on the dummy only selects the part; a short click on empty space does not push. Cancel a drag with Reset or by switching away from the window. Touch dragging is also supported.
+**Mouse controls:** press anywhere on the stage. Hold still to charge the power meter, or drag right toward the stairs to set power by distance and adjust the angle. Release to push; release is handled even outside the canvas. Starting on empty space uses the currently selected body part; starting on the dummy selects the nearby body part. Drag up/down to aim and farther for more power (180 pixels = full power). The push arrow grows with power and changes smoothly from green through yellow to red, while dragging, charging, or adjusting **Tweak last push**. A short click on the dummy only selects the part; a short click on empty space does not push. Cancel a drag with Reset or by switching away from the window. Touch dragging is also supported.
 
 Alternatively, use the power meter:
 
@@ -64,9 +64,11 @@ Each chamber/character combination has its own local leaderboard and personal be
 
 ## High scores and saved replays
 
+Total score combines **damage + progress**. Each newly passed stair earns 10 progress points (each ledge in The Shaft), capped at 20% of damage points, rounded down. For example, 15 steps and 1,000 damage points give 1,150 total points; 50 steps with the same damage give 1,200. Progress uses the furthest center-of-mass step count, so skipped stairs count, revisiting stairs adds nothing, and raw distance earns no points. Without damage, the bonus is zero. The stage and result panel show both parts; progress does not change injuries or recovery meters.
+
 After a qualifying fall, enter exactly three letters (A–Z) and select **Save score**. Each chamber/character board retains its ten highest scores, with a **Replay** button for each entry. Lowercase initials become uppercase. Replaying never submits another score.
 
-Scores and replay recipes persist in this browser using local storage (`dismount-scoreboard-v3` for Classic, with a layout suffix for other chambers and `-character-<id>` for non-human subjects). If storage is blocked or full, scores remain available for the current session and a message explains the limitation. This is a local leaderboard, not an online ranking; clearing browser data removes it.
+Scores and replay recipes persist in this browser using local storage (`dismount-scoreboard-v4` for Classic, with a layout suffix for other chambers and `-character-<id>` for non-human subjects). If storage is blocked or full, scores remain available for the current session and a message explains the limitation. This is a local leaderboard, not an online ranking; clearing browser data removes it.
 
 Saved replays reconstruct the fall from the exact, unrounded push settings using the pinned physics version, then play the recorded frames with sound. Reset cancels preparation or playback. Replays from an incompatible physics version are disabled; reconstruction checks the final score, impact count, and duration before playback. Increment `REPLAY_VERSION` when changing simulation behavior. The ordinary Replay control retains your last attempt independently of leaderboard playback.
 
@@ -98,6 +100,7 @@ The report includes a body silhouette that updates during play and replay. Gray 
 - `src/fullscreen.js`: native fullscreen, fallback and the settings drawer.
 - `src/subjects.js` and `src/challenges.js`: report themes and optional goals.
 - `src/endless.js`: depth milestones, color palettes and local depth records.
+- `src/shadow.js`: soft shadow projection across neighboring stair treads and ledges.
 - `tests/`: dependency-free Node.js regression tests.
 
 The ragdoll consists of 17 rigid bodies: head, cervical segment, chest, abdomen, pelvis, eight limb segments, two hands, and two feet. Capsules (rectangles with circular end caps) collide along their entire length. Bodies have explicit masses, moments of inertia, linear and angular velocities. Pushes apply a localized impulse over 0.2 seconds; off-center pushes create torque. Gravity is 9.81 m/s² at 70 drawing units per meter (a 1.75 m initial body envelope). Human mass is 73 kg; Robot 110 kg, Knight 96 kg including armor, Skeleton 10 kg, and Inflatable 3 kg. Segment centers of mass can differ from geometric midpoints. Human ratios use published segment data; fictional subjects use construction-based estimates. See [body calibration, sources and limitations](docs/physics.md).
@@ -108,11 +111,13 @@ Unconnected segments collide with one another, including opposite limbs. Directl
 
 Exposed stair edges concentrate damage up to 2.25× and add sharper rebounds and cracking sounds. Damage comes from real collision speeds and impulses; resting contact does not earn points. Noise synthesis does not affect physics. Identical inputs produce repeatable runs within the same engine/browser; bit-for-bit equality across different browser engines is not guaranteed.
 
-The mass and inertia update starts separate rankings because trajectories and scores changed. Previous v2 rankings remain untouched and accessible under **Previous records & replays**. Classic personal bests now use `dismount-anatomy-best-v3`; other layouts use their own suffixed keys. Older personal bests remain stored but are not compared with these runs.
+The progress bonus starts separate rankings because the scoring rules changed. Previous v3 and v2 rankings remain untouched and accessible under **Previous records & replays**, with their original scoring. Classic personal bests now use `dismount-anatomy-best-v4`; other layouts use their own suffixed keys. Older personal bests remain stored but are not compared with these runs. Endless depth records keep their existing key because the physics and depth measurement are unchanged.
 
 Physics is two-dimensional; perspective mode renders an extruded staircase. This is an original implementation with procedural artwork, not the original game's engine, assets, or full 3D camera system. Background tabs pause naturally rather than fast-forwarding the simulation on return.
 
 ## Rendering and responsiveness
+
+One soft shadow footprint is clipped across adjacent treads, gradually moving its area between them instead of jumping to the next tread. It fades with height and crossfades between overlapping ledges. Perspective mode projects it onto the tread planes. Endless projection uses world step coordinates; replay seeking computes the shadow directly from the selected frame.
 
 Chamber geometry and DOM references are cached. Damage-report updates run at most 20 times per second while simulation frames remain at 120 Hz. Impact markers are capped at 32. Recordings keep static anatomy once and dynamic values in chunked Float64 arrays, preserving exact frame values. Saved-replay reconstruction runs in a Web Worker over HTTP(S), with short main-thread chunks as a fallback for local files or unavailable workers. Reset terminates an active worker; the most recently completed saved replay stays cached for instant reopening. The previous completed attempt can also be retained as a ghost. Solver iterations remain unchanged; strong hand/foot pushes temporarily use finer integration. `node scripts/profile.cjs` reports simulation-plus-snapshot timings for the same chest push across all eight chambers. Profiling excludes browser rendering and is not a browser FPS measurement.
 
@@ -157,7 +162,7 @@ Fullscreen includes the stage, statistics and replay controls, respects display 
 
 Share a starting chamber with `?chamber=endless`, for example `https://milekz.github.io/dismount/?chamber=endless`. Valid chamber links skip the welcome dialog and open the selected chamber ready for a push. Changing chambers updates the URL without reloading. Supported values: `classic`, `steep`, `long`, `landing`, `uneven`, `shaft`, `endless`, `finalDrop`. Missing or unknown chamber values select Endless Stairs; the welcome screen appears unless the URL contains a valid chamber or character.
 
-Body calibration uses replay version `rigid-3.0.0`. Contact materials retain their stair-edge bonus. Strong pushes to hands or feet use 24 substeps during the push; other steps retain 12. All `rigid-2.3.0` subject replays and Human `rigid-2.2.0` replays use the frozen historical solver. Earlier incompatible replays remain disabled. Historical runs can be watched or tweaked into a new attempt; exact retry is disabled when the physics version differs.
+Current replay version `rigid-3.1.0` adds progress scoring to the unchanged `rigid-3.0.0` body calibration. Saved 3.0 replays retain impact-only scores. Contact materials retain their stair-edge bonus. Strong pushes to hands or feet use 24 substeps during the push; other steps retain 12. All `rigid-2.3.0` subject replays and Human `rigid-2.2.0` replays use the frozen historical solver. Earlier incompatible replays remain disabled. Historical runs can be watched or tweaked into a new attempt; exact retry is disabled when the replay version differs.
 
 Chamber links also accept selector numbers: `?chamber=1` (Classic), `2` (Short & steep), `3` (Long & shallow), `4` (Split flight), `5` (Uneven Steps), `6` (The Shaft), `7` (Endless Stairs), and `8` (Final Drop). Padded numbers such as `?chamber=07` work too.
 

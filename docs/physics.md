@@ -1,6 +1,7 @@
 # Body physics calibration
 
-The current solver is `rigid-3.0.0`. All five subjects use distinct segment masses,
+The current replay version is `rigid-3.1.0`, adding progress scoring without changing
+the `rigid-3.0.0` body physics. All five subjects use distinct segment masses,
 centers of mass (COM), rotational inertia, damping and neck compliance. This is a
 passive 2D ragdoll with stylized collision shapes, not a validated biomechanics or
 injury simulator.
@@ -84,9 +85,16 @@ biomechanical accuracy.
 2.2 Human schedule. Both worker and main-thread replay reconstruction dispatch
 by recipe version. Regression hashes protect historical trajectories.
 
-New scores use `dismount-scoreboard-v3` with chamber/character suffixes.
-The old v2 boards remain untouched and appear under **Previous records & replays**.
-Personal bests use `dismount-anatomy-best-v3`; endless depth records use
-`dismount-endless-depth-v2-<character>`. Old records remain stored but do not
-compete with the recalibrated physics. Historical runs can be watched or tweaked;
+Version 3.1 adds 10 points per newly passed stair or shaft ledge, capped at
+`floor(impactScore / 5)`. The furthest center-of-mass step count prevents repeat
+bonuses; raw distance adds none. Snapshots keep the total in `score`; summed
+`damage` groups retain the impact subtotal. Recovery meters use damage only.
+Version 3.0 recipes disable this bonus and retain their original output for all
+five subjects. Compact recordings preserve the breakdown while seeking.
+
+New scores use `dismount-scoreboard-v4` with chamber/character suffixes.
+The old v3 and v2 boards remain untouched under **Previous records & replays**.
+Personal bests use `dismount-anatomy-best-v4`; endless depth records stay at
+`dismount-endless-depth-v2-<character>` because physics and depth are unchanged.
+Old scores do not compete with the new rules. Historical runs can be watched or tweaked;
 exact retry remains available only for the current version.

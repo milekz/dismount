@@ -54,10 +54,10 @@ test('worker selects the frozen solver for historical recipes of every subject',
   sandbox.self=sandbox;const context=vm.createContext(sandbox);
   sandbox.importScripts=(...names)=>{for(const name of names)vm.runInContext(fs.readFileSync(path.resolve(__dirname,'../src',name),'utf8'),context);};
   vm.runInContext(fs.readFileSync(path.resolve(__dirname,'../src/replay-worker.js'),'utf8'),context);
-  for(const character of ['human','robot','knight','skeleton','inflatable']) {
-    const sim=new Simulation('classic',character,'rigid-2.3.0');sim.push('chest',6,1);
+  for(const engine of ['rigid-2.3.0','rigid-3.0.0'])for(const character of ['human','robot','knight','skeleton','inflatable']) {
+    const sim=new Simulation('classic',character,engine);sim.push('chest',6,1);
     for(let i=0;i<120;i++)sim.step();
-    const entry={...sim.snapshot(),engine:'rigid-2.3.0',steps:120,push:{part:'chest',angle:6,power:1}};
+    const entry={...sim.snapshot(),engine,steps:120,push:{part:'chest',angle:6,power:1}};
     sandbox.onmessage({data:entry});const result=messages.at(-1);
     assert.ok(!result.error,result.error);assert.equal(validEnd(Recording.from(result.recording),entry),true);
   }

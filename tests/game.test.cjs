@@ -11,7 +11,7 @@ const endlessFx = require('../src/endless.js');
 function setup(AudioContext, storage, reducedMotion=true, viewport={width:900,height:700}, url='https://example.com/?chamber=classic', physicsApi=physics) {
   const elements = new Map();
   let translations=[],scales=[];const scrollRequests=[];
-  const context2d = new Proxy({}, { get: (target, key) => target[key] ?? (key === 'clearRect' ? () => {translations=[];scales=[];} : key === 'translate' ? (...args)=>translations.push(args) : key === 'scale' ? (...args)=>scales.push(args) : key === 'createLinearGradient' ? () => ({ addColorStop() {} }) : () => {}), set: (target,key,value) => {target[key]=value;return true;} });
+  const context2d = new Proxy({}, { get: (target, key) => target[key] ?? (key === 'clearRect' ? () => {translations=[];scales=[];} : key === 'translate' ? (...args)=>translations.push(args) : key === 'scale' ? (...args)=>scales.push(args) : ['createLinearGradient','createRadialGradient'].includes(key) ? () => ({ addColorStop() {} }) : () => {}), set: (target,key,value) => {target[key]=value;return true;} });
   function element(id) {
     if (!elements.has(id)) elements.set(id, {
       value: id === 'angle' ? '15' : id === 'part' ? 'chest' : '', style: {}, disabled: false,
@@ -49,6 +49,7 @@ function setup(AudioContext, storage, reducedMotion=true, viewport={width:900,he
     sandbox.window.location={href:url};
     sandbox.window.history={state:null,replaceState(state,title,href){sandbox.window.location.href=href;}};
   }
+  sandbox.window.DismountShadow=require('../src/shadow.js');
   vm.runInNewContext(fs.readFileSync(require.resolve('../src/game.js'), 'utf8'), sandbox);
   return { host:sandbox.window, scrollRequests, element, windowEvents, url:()=>sandbox.window.location?.href, document, documentEvents, restoredScroll:()=>restoredScroll, camera:()=>translations[0], zoom:()=>scales[0]?.[0], click: id => element(id).events.click(), advance(seconds) {
     for (let frame = 0; frame < seconds * 60; frame++) { time += 1000 / 60; if (AudioContext?.instance) AudioContext.instance.currentTime = time/1000; nextFrame(time); }
@@ -643,6 +644,63 @@ test('retry preserves exact push power, and tweak changes only edited settings',
   const edited=save('DDD');assert.deepEqual(edited.push,{part:'leftFoot',angle:-10,power:.425});
   game.element('layout').value='shaft';game.element('layout').events.change();
   assert.equal(game.element('retry').disabled,true);
+});
+test('tweak preview restores the charged arrow and scales with the power slider',()=>{
+  class FinishedSimulation extends physics.Simulation {
+    step(){this.time+=physics.DT;this.active=false;}
+  }
+  const game=setup(undefined,undefined,true,undefined,undefined,{...physics,Simulation:FinishedSimulation});
+  const ctx=game.element('game').getContext();let path=[],arrow;
+  ctx.beginPath=()=>{path=[];};
+  ctx.moveTo=(x,y)=>path.push([x,y]);ctx.lineTo=(x,y)=>path.push([x,y]);
+  ctx.stroke=()=>{
+    if(ctx.strokeStyle.startsWith('hsl(')&&path.length===2)
+      arrow={length:Math.hypot(path[1][0]-path[0][0],path[1][1]-path[0][1]),color:ctx.strokeStyle};
+  };
+  game.click('launch');game.advance(.6);
+  const charged={...arrow};
+  game.click('launch');game.advance(.1);game.click('retry-edit');game.advance(.15);
+  assert.equal(game.element('retry-settings').hidden,false);
+  assert.deepEqual(arrow,charged,'Tweak should preview the same power as the original charge');
+  const previews=[];
+  for(const power of [0,25,75,100]) {
+    game.element('preset-power').value=String(power);game.element('preset-power').events.input();game.advance(.15);
+    previews.push({...arrow});
+  }
+  for(let i=1;i<previews.length;i++)assert.ok(previews[i].length>previews[i-1].length,'More power must produce a longer arrow');
+  assert.equal(new Set(previews.map(p=>p.color)).size,4);
+  game.element('angle').value='-100';game.element('angle').events.input();game.advance(.15);
+  assert.ok(Math.abs(arrow.length-previews.at(-1).length)<1e-9,'Changing direction preserves power length');
+  game.element('preset-power').value='0';game.element('preset-power').events.input();game.advance(.15);
+  assert.ok(Math.abs(arrow.length-previews[0].length)<1e-9,'Reducing power shrinks the arrow again');
+});
+
+test('score breakdown includes progress but recovery depends only on injuries, including replay seeking',()=>{
+  class ProgressSimulation extends physics.Simulation {
+    step() {
+      if(!this.active)return;
+      this.time+=physics.DT;this.stats.steps++;
+      this.impactScore=1000;this.damage.Torso=1000;this.bodyByName.torso.damage=1000;
+      this.updateScore();if(this.stats.steps===60)this.active=false;
+    }
+  }
+  const game=setup(undefined,undefined,true,undefined,undefined,{...physics,Simulation:ProgressSimulation});
+  game.click('drop');game.advance(.1);
+  const recovery=game.element('recovery-overall-meter').value;
+  game.advance(1);
+  assert.equal(game.element('score').textContent,'001200');
+  assert.equal(game.element('score-breakdown').textContent,'DAMAGE 1,000 + PROGRESS 200');
+  assert.equal(game.element('result-score-breakdown').textContent,'Damage 1,000 + Progress 200 = 1,200');
+  assert.equal(game.element('recovery-overall-meter').value,recovery);
+  game.click('replay');
+  for(const [index,score] of [[10,1100],[60,1200],[10,1100]]) {
+    game.element('replay-timeline').value=String(index);game.element('replay-timeline').events.input();
+    assert.equal(Number(game.element('score').textContent),score);
+    assert.equal(game.element('recovery-overall-meter').value,recovery);
+  }
+  game.click('reset');
+  assert.equal(game.element('score-breakdown').textContent,'DAMAGE 0 + PROGRESS 0');
+  assert.equal(game.element('recovery-overall-meter').value,100);
 });
 test('all chambers fit the initial dummy in narrow and desktop canvas viewports',()=>{
   for(const viewport of [{width:320,height:460},{width:900,height:700}]) {

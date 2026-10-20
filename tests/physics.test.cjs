@@ -33,8 +33,10 @@ function run(part='chest', angle=15, power=0.7, layout='classic') {
     }
   }
   assert.equal(simulation.active,false);
-  assert.equal(simulation.score,Object.values(simulation.damage).reduce((a,b)=>a+b,0));
-  assert.equal(simulation.score,simulation.bodies.reduce((sum,body)=>sum+body.damage,0));
+  assert.equal(simulation.impactScore,Object.values(simulation.damage).reduce((a,b)=>a+b,0));
+  assert.equal(simulation.impactScore,simulation.bodies.reduce((sum,body)=>sum+body.damage,0));
+  assert.equal(simulation.score,simulation.impactScore+simulation.progressScore);
+  assert.ok(simulation.progressScore<=Math.floor(simulation.impactScore/5));
   return simulation;
 }
 function isolate(simulation,names) {
