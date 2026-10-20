@@ -79,3 +79,20 @@ test('characters have isolated boards and legacy human records retain their stor
   storage.setItem(robot.key,JSON.stringify(malformed));
   assert.equal(new ScoreBoard(storage,'test','classic','robot').entries.length,0);
 });
+
+test('historical rankings stay available without competing with or being overwritten by new scores',()=>{
+  const {PREVIOUS_KEY}=require('../src/scores.js');
+  for(const layout of ['classic','endless'])for(const character of ['human','robot','knight','skeleton','inflatable']) {
+    const storage=memory(),source=new ScoreBoard(storage,'rigid-2.3.0',layout,character);
+    source.save('OLD',run(999999));
+    const previousKey=source.key.replace(KEY,PREVIOUS_KEY),original=storage.getItem(source.key);
+    storage.setItem(previousKey,original);storage.setItem(source.key,'');
+    const current=new ScoreBoard(storage,'rigid-3.0.0',layout,character);
+    assert.equal(current.entries.length,0);assert.equal(current.previousEntries.length,1);
+    assert.equal(current.get(current.previousEntries[0].id).nick,'OLD');
+    assert.equal(current.save('NEW',run(1)).ok,true);
+    assert.equal(current.entries[0].nick,'NEW');assert.equal(storage.getItem(previousKey),original);
+    const restored=new ScoreBoard(storage,'rigid-3.0.0',layout,character);
+    assert.equal(restored.entries[0].nick,'NEW');assert.equal(restored.previousEntries[0].nick,'OLD');
+  }
+});

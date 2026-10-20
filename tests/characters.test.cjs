@@ -16,6 +16,11 @@ function fall(character,layout='classic',part='chest',angle=15,power=.8) {
       const angle=s.jointAngle(j),tolerance=6*Math.PI/180;
       assert.equal(j.hinge.isLimitEnabled(),true);
       assert.ok(angle>=j.hinge.getLowerLimit()-tolerance&&angle<=j.hinge.getUpperLimit()+tolerance,`${character}/${layout}/${j.name}: angle ${angle}`);
+      if(j.slider) {
+        const travel=j.slider.getJointTranslation();
+        assert.ok(travel>=j.slider.getLowerLimit()-.01&&travel<=j.slider.getUpperLimit()+.01,
+          `${character}/${layout}: neck translation ${travel}`);
+      }
     }
   }
   assert.equal(s.active,false,character+' completes');

@@ -1,7 +1,7 @@
 /* Small, versioned replay recipes: exact inputs, not rounded display values. */
 (function (root) {
   'use strict';
-  const KEY = 'dismount-scoreboard-v2', LIMIT = 10;
+  const KEY = 'dismount-scoreboard-v3', PREVIOUS_KEY='dismount-scoreboard-v2', LIMIT = 10;
   const CHARACTERS=['human','robot','knight','skeleton','inflatable'];
   const PARTS = ['head','chest','hip','leftKnee','rightKnee','leftHand','rightHand','leftFoot','rightFoot'];
   const normalizeNick = value => String(value).toUpperCase().replace(/[^A-Z]/g,'').slice(0,3);
@@ -24,21 +24,27 @@
   class ScoreBoard {
     constructor(storage, engine, layout='classic', character='human') {
       this.layout=layout;this.character=CHARACTERS.includes(character)?character:'human';
-      this.key=(layout==='classic'?KEY:KEY+'-'+layout)+(this.character==='human'?'':'-character-'+this.character);
+      const suffix=(layout==='classic'?'':'-'+layout)+(this.character==='human'?'':'-character-'+this.character);
+      this.key=KEY+suffix;
       this.storage = storage; this.engine = engine; this.entries = []; this.persistent = true;
+      this.previousEntries=this.read(PREVIOUS_KEY+suffix);
+      this.entries=this.read(this.key);
+    }
+    read(key) {
       try {
-        const raw = storage.getItem(this.key);
+        const raw = this.storage.getItem(key);
         if (raw && raw.length <= 100000) {
           const parsed = JSON.parse(raw);
           if (parsed.version === 1 && Array.isArray(parsed.entries)) {
             const seen = new Set();
-            this.entries = parsed.entries.filter(entry => {
+            return parsed.entries.filter(entry => {
               if (!validEntry(entry) || (entry.layout||'classic')!==this.layout || (entry.character||'human')!==this.character || seen.has(entry.id)) return false;
               seen.add(entry.id); return true;
             }).sort((a,b)=>b.score-a.score || a.savedAt-b.savedAt).slice(0,LIMIT);
           }
         }
       } catch (_) { this.persistent = false; }
+      return [];
     }
     qualifies(score) {
       return Number.isSafeInteger(score) && score >= 0
@@ -63,9 +69,9 @@
       } catch (_) { this.persistent=false; }
       return {ok:true,persistent:this.persistent,entry};
     }
-    get(id) { return this.entries.find(entry=>entry.id===id); }
+    get(id) { return this.entries.find(entry=>entry.id===id)||this.previousEntries.find(entry=>entry.id===id); }
   }
-  const api = {ScoreBoard,normalizeNick,validEntry,KEY,LIMIT};
+  const api = {ScoreBoard,normalizeNick,validEntry,KEY,PREVIOUS_KEY,LIMIT};
   root.DismountScores=api;
   if (typeof module!=='undefined') module.exports=api;
 })(typeof window!=='undefined'?window:globalThis);

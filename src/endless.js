@@ -1,7 +1,7 @@
 /* Presentation and local depth records; independent of physics and replay recipes. */
 (function(root) {
   'use strict';
-  const INTERVAL=50,KEY='dismount-endless-depth-v1-';
+  const INTERVAL=50,KEY='dismount-endless-depth-v2-';
   const colors=['backgroundTop','backgroundBottom','side','riser','even','odd','stroke','ink','accent'];
   const zones=[
     ['Atrium',0xe7e9e0,0xdce0d2,0xb6beaa,0xacb79d,0xe3e7d9,0xd9dece,0xa2af93,0x61734e,0x8c6635],

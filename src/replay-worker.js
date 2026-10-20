@@ -1,5 +1,5 @@
 /* Rebuild off the UI thread; terminate() cancels all work immediately. */
-importScripts('../vendor/planck-1.5.0.js','physics.js','replay.js');
+importScripts('../vendor/planck-1.5.0.js','physics-legacy.js','body-profiles.js','physics.js','replay.js');
 self.onmessage=({data:entry})=>{
   try {
     const sim=new DismountPhysics.Simulation(entry.layout||'classic',entry.character||'human',entry.engine);

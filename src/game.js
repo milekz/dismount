@@ -28,7 +28,7 @@
   try { injuryLabels=storage?.getItem('dismount-injury-labels')!=='off'; } catch (_) { /* Optional preference. */ }
   const motionEnabled=()=>motion&&layout!=='endless';
   let camera=null, renderDelta=0, impactSlow=0, impactCooldown=0, shake=0;
-  const bestKey=()=>(layout==='classic'?'dismount-anatomy-best-v2':'dismount-anatomy-best-v2-'+layout)+(character==='human'?'':'-character-'+character);
+  const bestKey=()=>(layout==='classic'?'dismount-anatomy-best-v3':'dismount-anatomy-best-v3-'+layout)+(character==='human'?'':'-character-'+character);
   let replayCache=null,ghostFrames=null,ghostEnabled=false,attemptCompleted=false,challenge='none';
   const {themes}=window.DismountSubjects;
   const {goals,evaluate}=window.DismountChallenges;
@@ -706,20 +706,24 @@
     $('result').hidden=false;$('hint').textContent='CLICK ANYWHERE ON THE STAGE TO TRY AGAIN.';
   }
   function renderBoard() {
-    $('score-rows').replaceChildren();
-    board.entries.forEach((entry, index) => {
-      const row = document.createElement('tr');
-      for (const value of [String(index+1).padStart(2,'0'), entry.nick, entry.score.toLocaleString()]) {
-        const cell = document.createElement('td'); cell.textContent=value; row.appendChild(cell);
-      }
-      const cell=document.createElement('td'), button=document.createElement('button');
-      button.type='button'; button.setAttribute('data-score-id',entry.id);
-      button.textContent=supportsReplay(entry)?'▷ Replay':'Unavailable';
-      button.disabled=!['ready','finished'].includes(mode)||!supportsReplay(entry);
-      button.setAttribute('aria-label','Replay '+entry.nick+' — '+entry.score+' points');
-      if(!supportsReplay(entry))button.title='Recorded with a different physics version.';
-      cell.appendChild(button);row.appendChild(cell);$('score-rows').appendChild(row);
-    });
+    const rows=(entries,target)=>{
+      target.replaceChildren();
+      entries.forEach((entry, index) => {
+        const row = document.createElement('tr');
+        for (const value of [String(index+1).padStart(2,'0'), entry.nick, entry.score.toLocaleString()]) {
+          const cell = document.createElement('td'); cell.textContent=value; row.appendChild(cell);
+        }
+        const cell=document.createElement('td'), button=document.createElement('button');
+        button.type='button'; button.setAttribute('data-score-id',entry.id);
+        button.textContent=supportsReplay(entry)?'▷ Replay':'Unavailable';
+        button.disabled=!['ready','finished'].includes(mode)||!supportsReplay(entry);
+        button.setAttribute('aria-label','Replay '+entry.nick+' — '+entry.score+' points');
+        if(!supportsReplay(entry))button.title='Recorded with a different physics version.';
+        cell.appendChild(button);row.appendChild(cell);target.appendChild(row);
+      });
+    };
+    rows(board.entries,$('score-rows'));rows(board.previousEntries,$('previous-score-rows'));
+    $('previous-scores').hidden=!board.previousEntries.length;
     $('board-empty').hidden=board.entries.length>0;
     $('board-message').textContent=board.persistent?'Saved in this browser. Replay any recorded run.':'Browser storage unavailable. Scores last for this session only.';
   }
@@ -844,7 +848,7 @@
       startReplay(job.frames,job.entry.nick,job.entry.push,job.entry.engine);
     }
   }
-  $('score-rows').addEventListener('click',event=>{
+  function replayScore(event) {
     const button=event.target.closest('button[data-score-id]');
     if(!button||!['ready','finished'].includes(mode))return;
     const entry=board.get(button.getAttribute('data-score-id'));
@@ -881,7 +885,8 @@
     $('stage').setAttribute('data-finished','false');$('drop').disabled=true;
     $('launch').disabled=true;$('replay').disabled=true;
     $('status').textContent='PREPARING REPLAY';$('hint').textContent='REBUILDING RECORDED PHYSICS…';
-  });
+  }
+  for(const id of ['score-rows','previous-score-rows'])$(id).addEventListener('click',replayScore);
   $('initials').addEventListener('input',()=>{$('initials').value=normalizeNick($('initials').value);});
   $('score-entry').addEventListener('submit',event=>{
     event.preventDefault();

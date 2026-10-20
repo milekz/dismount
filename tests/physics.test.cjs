@@ -25,6 +25,11 @@ function run(part='chest', angle=15, power=0.7, layout='classic') {
       assert.equal(joint.hinge.isLimitEnabled(),true);
       const angle=simulation.jointAngle(joint), tolerance=6*Math.PI/180;
       assert.ok(angle>=joint.hinge.getLowerLimit()-tolerance && angle<=joint.hinge.getUpperLimit()+tolerance, `${part}/${angle}/${power}: ${joint.name} exceeded active joint limits at ${simulation.time}: ${angle*180/Math.PI}`);
+      if(joint.slider) {
+        const travel=joint.slider.getJointTranslation();
+        assert.ok(travel>=joint.slider.getLowerLimit()-.01&&travel<=joint.slider.getUpperLimit()+.01,
+          `${part}/${power}: neck translation exceeded its active stops: ${travel}`);
+      }
     }
   }
   assert.equal(simulation.active,false);
@@ -91,7 +96,7 @@ test('joint damping is dissipative and has a finite torque budget', () => {
   for(const seg of s.bodies) if(!keep.has(seg.body))s.world.destroyBody(seg.body);
   s.bodies=s.bodies.filter(seg=>keep.has(seg.body));s.joints=[joint];s.world.setGravity(pl.Vec2(0,0));
   moveWhole(s,800,-400);
-  const energy=()=>s.bodies.reduce((sum,seg)=>sum+0.5*seg.mass*seg.body.getLinearVelocity().lengthSquared()+0.5*seg.body.getInertia()*seg.body.getAngularVelocity()**2,0);
+  const energy=()=>s.bodies.reduce((sum,seg)=>sum+0.5*seg.mass*seg.body.getLinearVelocity().lengthSquared()+0.5*seg.inertia*seg.body.getAngularVelocity()**2,0);
   const before=energy();
   for(let i=0;i<240;i++){s.applyJointForces();s.world.step(DT/4,24,32);}
   assert.ok(energy()<before,'Damping must remove rather than inject energy');
@@ -99,12 +104,12 @@ test('joint damping is dissipative and has a finite torque budget', () => {
 test('neck slider stretches, stays bounded and returns under a damped spring', () => {
   const s=new Simulation();s.world.setGravity(pl.Vec2(0,0));moveWhole(s,800,-400);
   const neck=s.joints.find(j=>j.name==='neck');
-  for(const name of ['head','neckLink']) {const b=s.bodyByName[name].body,p=b.getPosition();b.setPosition(pl.Vec2(p.x,p.y-12/PPM));}
-  const before=Math.abs(neck.slider.getJointTranslation());assert.ok(before>0.1);
+  for(const name of ['head','neckLink']) {const b=s.bodyByName[name].body,p=b.getPosition();b.setPosition(pl.Vec2(p.x,p.y-.008));}
+  const before=Math.abs(neck.slider.getJointTranslation());assert.ok(before>.005);
   s.push('head',0,0);
   for(let i=0;i<240;i++) {
     s.step();
-    assert.ok(neck.slider.getJointTranslation()<20/PPM,'Neck extension must be bounded');
+    assert.ok(neck.slider.getJointTranslation()<s.profile.neck.extension+.005,'Neck extension must be bounded');
   }
   assert.ok(Math.abs(neck.slider.getJointTranslation())<before*0.2);
 });
@@ -181,7 +186,8 @@ test('edge contact intensifies damage compared with a flat tread and does not sc
 test('vendored engine and adapter load as local browser scripts without require or network', () => {
   const sandbox={};sandbox.window=sandbox;
   vm.runInNewContext(fs.readFileSync(require.resolve('../vendor/planck-1.5.0.js'),'utf8'),sandbox);
-  vm.runInNewContext(fs.readFileSync(require.resolve('../src/physics.js'),'utf8'),sandbox);
+  for(const file of ['physics-legacy','body-profiles','physics'])
+    vm.runInNewContext(fs.readFileSync(require.resolve('../src/'+file+'.js'),'utf8'),sandbox);
   const simulation=new sandbox.DismountPhysics.Simulation();simulation.push('chest',15,0.7);simulation.step();
   assert.equal(simulation.snapshot().segments.length,17);
 });

@@ -7,6 +7,8 @@
   <title>Stair Dismount — Impact Laboratory</title>
   <link rel="stylesheet" href="style.css">
   <script defer src="vendor/planck-1.5.0.js"></script>
+  <script defer src="src/physics-legacy.js"></script>
+  <script defer src="src/body-profiles.js"></script>
   <script defer src="src/physics.js"></script>
   <script defer src="src/scores.js"></script>
   <script defer src="src/character-art.js"></script>
@@ -68,6 +70,11 @@
       <p id="board-message" class="help" role="status">Saved in this browser. Replay any recorded run.</p>
       <table class="score-table"><caption class="sr-only">Ten best dismounts with three-letter initials and replays</caption><thead><tr><th scope="col">RANK</th><th scope="col">NAME</th><th scope="col">SCORE</th><th scope="col">REPLAY</th></tr></thead><tbody id="score-rows"></tbody></table>
       <p id="board-empty" class="help">No scores yet. Finish a run and add your initials.</p>
+      <details id="previous-scores" hidden>
+        <summary>Previous records &amp; replays</summary>
+        <p class="help">Recorded before the physics update. Kept separately so the new rankings stay comparable.</p>
+        <table class="score-table"><caption class="sr-only">Previous records and their saved replays</caption><thead><tr><th scope="col">RANK</th><th scope="col">NAME</th><th scope="col">SCORE</th><th scope="col">REPLAY</th></tr></thead><tbody id="previous-score-rows"></tbody></table>
+      </details>
     </section>
     <footer><span>INSPIRED BY PORRASTURVAT, 2002 <span class="footer-dot">/</span> AN INDEPENDENT BROWSER RECREATION</span><span>BUILT FOR THE FALL. ↘</span></footer>
   </main>

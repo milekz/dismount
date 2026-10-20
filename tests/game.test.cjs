@@ -491,12 +491,12 @@ test('motion tracks only after launch and can be disabled without changing physi
   assert.equal(animated.element('motion').textContent,'MOTION FX OFF');
   animated.click('motion');
   animated.advance(.1);still.advance(.1);const origin=animated.camera(),zoom=animated.zoom();
-  animated.click('launch');animated.advance(.3);
+  animated.click('launch');animated.advance(.7);
   assert.deepEqual(animated.camera(),origin);assert.equal(animated.zoom(),zoom);
   animated.click('launch');animated.advance(3);
   assert.ok(animated.zoom()>zoom);
   assert.notDeepEqual(animated.camera(),origin);
-  still.click('launch');still.advance(.3);still.click('launch');still.advance(3);
+  still.click('launch');still.advance(.7);still.click('launch');still.advance(3);
   assert.ok(parseFloat(animated.element('elapsed').textContent)<parseFloat(still.element('elapsed').textContent),'Strong impacts should briefly slow playback');
   animated.advance(30);still.advance(30);
   assert.equal(animated.element('status').textContent,'EXPERIMENT COMPLETE');
@@ -974,7 +974,7 @@ test('saved replay worker is cancelled on reset, ignores stale replies and cache
   const sim=new physics.Simulation(),frames=new Recording();frames.push(sim.snapshot());sim.push('chest',15,.8);
   while(sim.active){sim.step();const f=sim.snapshot();f.impacts=sim.impacts;frames.push(f);}
   const end=frames.at(-1),entry={id:'worker-test',nick:'CPU',score:end.score,hits:end.hits,time:end.time,steps:frames.length-1,layout:'classic',character:'human',engine:physics.REPLAY_VERSION,savedAt:1,push:{part:'chest',angle:15,power:.8}};
-  const storage={getItem:k=>k==='dismount-scoreboard-v2'?JSON.stringify({version:1,entries:[entry]}):null,setItem(){}};
+  const storage={getItem:k=>k===require('../src/scores.js').KEY?JSON.stringify({version:1,entries:[entry]}):null,setItem(){}};
   const g=setup(undefined,storage,true,undefined,'https://example.com/?chamber=1');const workers=[];
   g.host.Worker=class{constructor(){workers.push(this);}postMessage(e){this.entry=e;}terminate(){this.stopped=true;}};
   const button={getAttribute:()=>entry.id},replay=()=>g.element('score-rows').events.click({target:{closest:()=>button}});
@@ -985,4 +985,32 @@ test('saved replay worker is cancelled on reset, ignores stale replies and cache
   assert.equal(g.element('status').textContent,'REPLAYING EXPERIMENT');g.click('stage-reset');replay();
   assert.equal(workers.length,2,'second playback uses cached recording');
   assert.equal(g.element('status').textContent,'REPLAYING EXPERIMENT');
+});
+
+test('previous records remain replayable in the archive without setting new personal bests',()=>{
+  const {PREVIOUS_KEY}=require('../src/scores.js');
+  for(const character of ['human','robot']) {
+    const s=new physics.Simulation('classic',character,'rigid-2.3.0');s.push('chest',6,1);
+    for(let i=0;i<120;i++)s.step();
+    const entry={id:'archive-'+character,nick:'OLD',score:s.score,hits:s.hits,time:s.time,steps:120,
+      layout:'classic',character,engine:'rigid-2.3.0',savedAt:1,push:{part:'chest',angle:6,power:1}};
+    const key=PREVIOUS_KEY+(character==='human'?'':'-character-'+character);
+    const values=new Map([[key,JSON.stringify({version:1,entries:[entry]})]]);
+    const storage={getItem:k=>values.get(k)||null,setItem:(k,v)=>values.set(k,v)};
+    const g=setup(undefined,storage,true,undefined,'https://example.com/?chamber=1&character='+character);
+    assert.equal(g.element('previous-scores').hidden,false);
+    assert.equal(g.element('score-rows').children.length,0);
+    assert.equal(g.element('best').textContent,'0');
+    const button=g.element('previous-score-rows').children[0].children[3].children[0];
+    assert.equal(button.disabled,false);
+    g.element('previous-score-rows').events.click({target:{closest:()=>button}});
+    assert.equal(g.element('status').textContent,'PREPARING REPLAY');g.advance(10);
+    assert.equal(g.element('status').textContent,'EXPERIMENT COMPLETE');
+    assert.equal(Number(g.element('score').textContent.replace(/,/g,'')),entry.score);
+    assert.equal(g.element('retry').disabled,true);
+    assert.equal(g.element('best').textContent,'0');
+    assert.equal(values.size,1,'watching an archive must not write current records');
+    g.click('stage-reset');g.element('character').value='knight';g.element('character').events.change();
+    assert.equal(g.element('previous-scores').hidden,true);
+  }
 });
