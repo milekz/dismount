@@ -15,6 +15,7 @@
   <script defer src="src/subjects.js"></script>
   <script defer src="src/challenges.js"></script>
   <script defer src="src/fullscreen.js"></script>
+  <script defer src="src/endless.js"></script>
   <script defer src="src/game.js"></script>
 </head>
 <body>
@@ -27,6 +28,8 @@
         <div class="arena-top"><span><span class="live-dot"></span> <span id="status">READY TO DISMOUNT</span></span><div class="arena-top-actions"><span id="fps" title="Rendered frames per second" aria-label="Frames per second">— FPS</span><span id="chamber-number">TEST CHAMBER / 07</span><button id="stage-reset" class="small-button" type="button" title="Stop the round or replay and reset the character">RESET</button></div></div>
         <div class="scoreboard"><p>IMPACT SCORE</p><strong id="score">000000</strong><span>PERSONAL BEST <b id="best">0</b></span></div>
         <div id="challenge-status" class="challenge-status" hidden></div><div id="impact-notice" class="impact-notice" hidden></div>
+        <div id="endless-progress" class="endless-progress" hidden><span id="endless-zone">SUBLEVEL 01 · ATRIUM</span><strong id="endless-depth">0 STEPS ↓</strong><span id="endless-next">NEXT 50 · BEST 0</span></div>
+        <div id="endless-milestone" class="endless-milestone" role="status" aria-live="polite" hidden><strong id="endless-milestone-title"></strong><span id="endless-milestone-joke"></span></div>
         <canvas id="game" aria-label="Ragdoll in a test chamber. Select push settings and press Dismount."></canvas>
         <div class="scene-label"><span id="layout-caption">ENDLESS STAIRS · 120 s MAX</span> <span>·</span> 9.81 m/s² <span>·</span> ZERO REGRETS</div>
         <div id="result" class="result" hidden><p id="result-outcome">EXPERIMENT COMPLETE</p><h2 id="result-title">A solid landing.</h2><p id="result-quip" class="result-quip"></p><p id="result-detail"></p><form id="score-entry" hidden>

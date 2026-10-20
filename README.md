@@ -95,6 +95,7 @@ The report includes a body silhouette that updates during play and replay. Gray 
 - `src/audio.js`: gesture-unlocked sound synthesis, volume and impact mixing.
 - `src/fullscreen.js`: native fullscreen, fallback and the settings drawer.
 - `src/subjects.js` and `src/challenges.js`: report themes and optional goals.
+- `src/endless.js`: depth milestones, color palettes and local depth records.
 - `tests/`: dependency-free Node.js regression tests.
 
 The ragdoll consists of 17 rigid bodies: head, cervical segment, chest, abdomen, pelvis, eight limb segments, two hands, and two feet. Capsules (rectangles with circular end caps) collide along their entire length. Bodies have explicit masses, moments of inertia, linear and angular velocities. Pushes apply a localized impulse over 0.2 seconds; off-center pushes create torque. Gravity is 9.81 m/s² at 90 drawing units per meter.
@@ -138,7 +139,9 @@ Use **INJURY RINGS ON/OFF** below the stage to hide injury circles and dislocati
 
 **INJURY TEXT ON/OFF** independently toggles floating injury labels and the impact notice during play and replay. Text is on by default and the preference is saved locally. The body damage report stays available.
 
-**Endless Stairs** generates more steps ahead of the falling character, with no final landing. A steady tracking camera works independently of Motion FX. Each attempt ends when the character settles or reaches the 120-second recording limit. This chamber has its own high-score board and supports retries and replays.
+**Endless Stairs** generates more steps ahead of the falling character, with no final landing. A steady tracking camera works independently of Motion FX. Rendering keeps steps beyond the camera edges so they scroll out of view without popping away; tread colors stay fixed during descent and replay. Each attempt ends when the character settles or reaches the 120-second recording limit. This chamber has its own high-score board and supports retries and replays.
+
+Every **50 steps passed**, a marked tread and a short humorous announcement celebrate the next depth milestone. Colors gradually shift through sage, blue, lilac and sandstone as the descent continues. The stage shows the current step count, next milestone and best depth for the selected character. Depth records persist locally (`dismount-endless-depth-v1-<character>`); replay and timeline seeking reproduce the depth and colors without setting new records. Milestones are visual markers, not respawn points, and do not affect scores or physics.
 
 Run statistics below the stage show steps passed (ledges in The Shaft), distance travelled, maximum speed, and time airborne. Distance and speed use the whole body's center of mass; airborne time counts ticks with no environment contact. Progress counts steps below and behind the center of mass, so skipped steps count too. Statistics follow replay scrubbing and reset with each attempt.
 

@@ -6,6 +6,8 @@
   const {ScoreBoard, normalizeNick} = window.DismountScores;
   let storage;
   try { storage = localStorage; } catch (_) {}
+  const endlessFx=window.DismountEndless,depthRecords=endlessFx.createRecords(storage);
+  window.addEventListener('pagehide',()=>depthRecords.save());
   let linkedChamber=null, linkedCharacter=null;
   try {
     const params=new URL(window.location.href).searchParams;
@@ -37,7 +39,7 @@
   const $ = id => {if(!dom.has(id))dom.set(id,document.getElementById(id));return dom.get(id);};
   const chambers=Object.fromEntries(Object.keys(LAYOUTS).map(id=>[id,buildStair(id)]));
   let replayPaused=false,replaySpeed=1,peakFrame=0,retryRecipe=null,presetPower=0,reportClock=0;
-  let noticeLife=0;
+  let noticeLife=0,milestoneLife=0;
   const canvas = $('game'), ctx = canvas.getContext('2d');
   const groups = ['Head', 'Torso', 'Arms', 'Legs'];
   let mode = 'ready', power = 0, meterTime = 0, accumulator = 0, last = 0;
@@ -47,7 +49,7 @@
   const tone=(...args)=>audioFx.tone(...args),unlockAudio=()=>audioFx.unlock();
   let launchPress = null, suppressLaunchClick = false;
   let drag = null, chargeBeat = 0;
-  let width = 0, height = 0, scale = 1, offsetX = 0, offsetY = 0,backgroundGradient=null,lastDraw=-Infinity;
+  let width = 0, height = 0, scale = 1, offsetX = 0, offsetY = 0,backgroundGradient=null,backgroundKey='',lastDraw=-Infinity;
   const reportValues=new Map();
   function reportText(id,value){if(reportValues.get(id)!==value){$(id).textContent=value;reportValues.set(id,value);}}
   function reportAttr(id,key,value){const cache=id+':'+key;if(reportValues.get(cache)!==value){$(id).setAttribute(key,value);reportValues.set(cache,value);}}
@@ -78,10 +80,16 @@
   function circle(x,y,r,color) { ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.fillStyle=color;ctx.fill(); }
   function render() {
     ctx.clearRect(0,0,width,height);
-    if(!backgroundGradient){backgroundGradient=ctx.createLinearGradient(0,0,width,height);backgroundGradient.addColorStop(0,'#e7e9e0');backgroundGradient.addColorStop(1,'#dce0d2');}ctx.fillStyle=backgroundGradient;ctx.fillRect(0,0,width,height);
     const endless=(current.layout||layout)==='endless';
-    const firstStep=endless?Math.max(0,Math.floor((Math.min(...current.points.map(p=>p.x))-220)/48)-8):0;
-    const stair=endless?buildStair('endless',firstStep):chambers[current.layout||layout];
+    const atmosphere=endless?endlessFx.palette(endlessFx.steps(current)):null;
+    const backgroundTop=atmosphere?.backgroundTop||'#e7e9e0',backgroundBottom=atmosphere?.backgroundBottom||'#dce0d2';
+    const key=backgroundTop+backgroundBottom;
+    if(!backgroundGradient||backgroundKey!==key) {
+      backgroundGradient=ctx.createLinearGradient(0,0,width,height);
+      backgroundGradient.addColorStop(0,backgroundTop);backgroundGradient.addColorStop(1,backgroundBottom);backgroundKey=key;
+    }
+    ctx.fillStyle=backgroundGradient;ctx.fillRect(0,0,width,height);
+    let stair=chambers[current.layout||layout];
     const farthest=Math.max(stair.end+158,...current.points.map(p=>p.x+80));
     const left=Math.min(0,...current.segments.map(s=>Math.min(s.ax,s.bx)-s.radius-40));
     const top=Math.min(0,...current.segments.map(s=>Math.min(s.ay,s.by)-s.radius-25));
@@ -113,12 +121,26 @@
     const blend=1-Math.exp(-renderDelta*5);
     for(const key of ['scale','x','y'])camera[key]+=(target[key]-camera[key])*blend;
     scale=camera.scale;offsetX=camera.x;offsetY=camera.y;
+    const depthX=perspective?115:0,depthY=perspective?-68:0;
+    if(endless) {
+      // Keep both projected faces until they leave the actual camera, including its tracking lag.
+      const margin=80,stepWidth=stair.width,rise=stair.rise;
+      const first=Math.max(0,Math.floor(((-offsetX-margin)/scale-depthX-stair.start)/stepWidth));
+      const end=Math.max(first+1,Math.ceil(((width-offsetX+margin)/scale-stair.start)/stepWidth));
+      const treads=Array.from({length:end-first},(_,i)=>{
+        const index=first+i;
+        return {x:stair.start+index*stepWidth,y:stair.top+(index+1)*rise,width:stepWidth,rise,index};
+      });
+      stair={...stair,treads,end:stair.start+end*stepWidth,
+        floor:Math.max(treads[treads.length-1].y,(height-offsetY+margin)/scale)};
+    }
     const jitter=motionEnabled()?Math.min(3,shake*12):0;
     ctx.save();ctx.translate(offsetX+Math.sin(last*.071)*jitter,offsetY+Math.cos(last*.093)*jitter);ctx.scale(scale,scale);
-    const depthX=perspective?115:0,depthY=perspective?-68:0;
-    ctx.strokeStyle='#cbd1c1';ctx.lineWidth=1;
-    for(let x=-200;x<1700;x+=80){ctx.beginPath();ctx.moveTo(x,stair.floor+61);ctx.lineTo(x+450,stair.floor-199);ctx.stroke();}
-    for(let y=stair.floor+11;y<stair.floor+211;y+=35){ctx.beginPath();ctx.moveTo(-150,y);ctx.lineTo(1700,y);ctx.stroke();}
+    if(!endless) {
+      ctx.strokeStyle='#cbd1c1';ctx.lineWidth=1;
+      for(let x=-200;x<1700;x+=80){ctx.beginPath();ctx.moveTo(x,stair.floor+61);ctx.lineTo(x+450,stair.floor-199);ctx.stroke();}
+      for(let y=stair.floor+11;y<stair.floor+211;y+=35){ctx.beginPath();ctx.moveTo(-150,y);ctx.lineTo(1700,y);ctx.stroke();}
+    }
     if(stair.kind==='shaft') {
       const block=(x,y,w,h,color)=>{
         polygon([[x,y],[x+w,y],[x+w,y+h],[x,y+h]],color,'#a2af93');
@@ -134,18 +156,29 @@
       block(stair.start,stair.floor,stair.end+208-stair.start,71,'#b6beaa');
     } else {
       // Staircase side silhouette, with separate tread and riser faces.
-      const side=[[40,stair.top],[stair.start,stair.top]];
+      const first=stair.treads[0],clipped=endless&&first.index>0;
+      const side=clipped?[[first.x,first.y-first.rise]]:[[40,stair.top],[stair.start,stair.top]];
       for(const t of stair.treads)side.push([t.x,t.y],[t.x+t.width,t.y]);
-      side.push([stair.end,stair.floor],[stair.end+118,stair.floor],[stair.end+118,stair.floor+71],[40,stair.floor+71]);
-      polygon(side,'#b6beaa','#a5b098');
+      if(endless)side.push([stair.end,stair.floor],[clipped?first.x:40,stair.floor]);
+      else side.push([stair.end,stair.floor],[stair.end+118,stair.floor],[stair.end+118,stair.floor+71],[40,stair.floor+71]);
+      polygon(side,atmosphere?.side||'#b6beaa',atmosphere?.stroke||'#a5b098');
       polygon([[40,205],[220,205],[220+depthX,205+depthY],[40+depthX,205+depthY]],'#eff0e6','#bdc6b0');
-      stair.treads.forEach((t,i)=>{
+      stair.treads.forEach(t=>{
         const {x,y,width:w,rise}=t;
-        polygon([[x,y-rise],[x+depthX,y-rise+depthY],[x+depthX,y+depthY],[x,y]],'#acb79d','#a2af93');
-        polygon([[x,y],[x+w,y],[x+w+depthX,y+depthY],[x+depthX,y+depthY]],i%2?'#d9dece':'#e3e7d9','#b8c2aa');
+        // World-indexed colors stay fixed while the camera or replay moves past a step.
+        const tint=endless?endlessFx.palette(t.index+1):null;
+        polygon([[x,y-rise],[x+depthX,y-rise+depthY],[x+depthX,y+depthY],[x,y]],tint?.riser||'#acb79d',tint?.stroke||'#a2af93');
+        polygon([[x,y],[x+w,y],[x+w+depthX,y+depthY],[x+depthX,y+depthY]],t.index%2?(tint?.odd||'#d9dece'):(tint?.even||'#e3e7d9'),tint?.stroke||'#b8c2aa');
         line({x,y},{x:x+w,y},'#f5f5ed',2);
-        ctx.fillStyle='#8b997b';ctx.font='10px monospace';ctx.fillText(String(t.index+1).padStart(2,'0'),x+16,y+21);
+        ctx.fillStyle=tint?.ink||'#8b997b';ctx.font='10px monospace';ctx.fillText(String(t.index+1).padStart(2,'0'),x+16,y+21);
       });
+      if(endless)for(const t of stair.treads) {
+        if((t.index+1)%endlessFx.INTERVAL)continue;
+        const tint=endlessFx.palette(t.index+1);
+        line({x:t.x,y:t.y},{x:t.x+t.width,y:t.y},tint.accent,4);
+        ctx.fillStyle='#f7f6f1';ctx.fillRect(t.x+5,t.y+9,134,29);
+        ctx.fillStyle=tint.accent;ctx.font='bold 15px monospace';ctx.fillText((t.index+1)+' STEPS ↓',t.x+12,t.y+29);
+      }
       if(!endless)polygon([[stair.end,stair.floor],[stair.end+208,stair.floor],[stair.end+208+depthX,stair.floor+depthY],[stair.end+depthX,stair.floor+depthY]],'#d4dbc7','#b8c2aa');
       if(stair.drop) {
         const y=stair.treads[stair.treads.length-1].y,x=stair.end;
@@ -282,7 +315,7 @@
     reportText('stat-distance',stats.distance.toFixed(2)+' m');
     reportText('stat-speed',stats.maxSpeed.toFixed(2)+' m/s');
     reportText('stat-airtime',stats.airtime.toFixed(2)+' s');
-    updateInjuryMap();updateChallenge();
+    updateInjuryMap();updateChallenge();updateEndlessProgress();
     reportText('score',String(current.score).padStart(6,'0'));
     $('injuries').textContent=(current.joints||[]).filter(joint=>joint.broken).length+' / '+current.joints.length;
     $('hits').textContent=current.hits+' HITS';$('elapsed').textContent=current.time.toFixed(2)+' s';
@@ -407,6 +440,16 @@
     reportText('challenge-status',(result.complete?'✓ Complete · ':'')+result.text);
     reportAttr('challenge-status','data-complete',String(result.complete));
   }
+  function updateEndlessProgress() {
+    const visible=(current.layout||layout)==='endless';
+    $('endless-progress').hidden=!visible;
+    if(!visible){clearMilestone();return;}
+    const depth=endlessFx.steps(current),zone=endlessFx.palette(depth);
+    reportText('endless-zone','SUBLEVEL '+String(zone.zone).padStart(2,'0')+' · '+zone.name.toUpperCase());
+    reportText('endless-depth',depth+' STEPS ↓');
+    reportText('endless-next','NEXT '+((Math.floor(depth/endlessFx.INTERVAL)+1)*endlessFx.INTERVAL)+' · BEST '+depthRecords.best(current.character));
+  }
+  function clearMilestone() {milestoneLife=0;$('endless-milestone').hidden=true;}
   function updateChamberNumber() {
     const number=Array.from($('layout').options).findIndex(option=>option.value===layout)+1;
     $('chamber-number').textContent='TEST CHAMBER / '+String(number).padStart(2,'0');
@@ -496,6 +539,7 @@
     $('part').disabled=value;$('angle').disabled=value;$('layout').disabled=!['ready','finished'].includes(mode);$('character').disabled=$('layout').disabled;$('challenge').disabled=$('layout').disabled;renderBoard();
   }
   function reset() {
+    depthRecords.save();clearMilestone();
     audioFx.clear();
     replayJob?.worker?.terminate();
     playbackFrames=new Recording();
@@ -641,6 +685,8 @@
     return {title:nextJoke(category),quip:nextJoke('observations')+' '+nextJoke('verdicts')};
   }
   function finish(replaying=false){
+    if(!replaying)depthRecords.save();
+    clearMilestone();
     if(!replaying){retryRecipe={...runPush,layout,character};attemptCompleted=true;ghostFrames=frames;updateGhost();}
     else {replayPaused=true;updateReplayControls();}
     mode='finished';lock(true);$('launch').disabled=false;$('launch').innerHTML='New experiment <span>↗</span>';$('status').textContent='EXPERIMENT COMPLETE';$('replay').disabled=!frames.length;
@@ -682,6 +728,7 @@
     $('game-panel').scrollIntoView?.({block:'start',behavior:window.matchMedia?.('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'});
   }
   function startReplay(recording, label='', recipe=runPush,engine=REPLAY_VERSION) {
+    clearMilestone();
     revealStage();
     unlockAudio();noticeLife=0;$('impact-notice').hidden=true;replayPaused=false;peakFrame=0;let peakPoints=-1;
     peakFrame=recording.peakIndex;peakPoints=recording.peakPoints;
@@ -705,6 +752,7 @@
   }
   function seekReplay(index) {
     if(!playbackFrames.length||$('replay-controls').hidden)return;
+    clearMilestone();
     mode='replay';replayPaused=true;camera=null;accumulator=0;impactSlow=0;shake=0;particles=[];noticeLife=0;$('impact-notice').hidden=true;
     replayIndex=Math.max(0,Math.min(playbackFrames.length-1,Math.round(Number(index)||0)));
     current=playbackFrames.at(replayIndex);pendingScore=null;
@@ -753,6 +801,15 @@
     if(mode!=='ready')return;power=presetPower;mode='aiming';launch();
   });
   function showFrameEvents(frame,previous,audible=true) {
+    const milestone=endlessFx.milestone(frame,previous);
+    const record=mode==='running'&&milestone&&milestone.steps>depthRecords.best(frame.character);
+    if(mode==='running')depthRecords.record(frame);
+    if(milestone&&audible) {
+      reportText('endless-milestone-title',(record?'NEW DEPTH RECORD · ':'MILESTONE · ')+milestone.steps+' STEPS');
+      reportText('endless-milestone-joke',milestone.joke);
+      $('endless-milestone').hidden=false;milestoneLife=4;
+      if(mode==='running')depthRecords.save();
+    }
     for(const hit of frame.impacts||[]) {
       const kind=hit.edge?'EDGE':hit.self?'BODY CONTACT':'LANDING';
       particles.push({...hit,life:1,label:kind+' +'+hit.points});
@@ -889,6 +946,7 @@
     if(!(mode==='replay'&&replayPaused)) {
       particles.forEach(p=>{p.life-=delta;});particles=particles.filter(p=>p.life>0);
       noticeLife=Math.max(0,noticeLife-delta);if(!noticeLife)$('impact-notice').hidden=true;
+      milestoneLife=Math.max(0,milestoneLife-delta);if(!milestoneLife)$('endless-milestone').hidden=true;
     }
     audioFx.flush();
     const moving=['running','charging','aiming'].includes(mode)||(mode==='replay'&&!replayPaused)||particles.length||shake>0;

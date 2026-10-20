@@ -5,12 +5,13 @@ const assert = require('node:assert/strict');
 const vm = require('node:vm');
 const fs = require('node:fs');
 const physics = require('../src/physics.js');
+const endlessFx = require('../src/endless.js');
 
 // Keep shared gesture and replay fixtures on Classic; startup tests pass their own URL.
-function setup(AudioContext, storage, reducedMotion=true, viewport={width:900,height:700}, url='https://example.com/?chamber=classic') {
+function setup(AudioContext, storage, reducedMotion=true, viewport={width:900,height:700}, url='https://example.com/?chamber=classic', physicsApi=physics) {
   const elements = new Map();
   let translations=[],scales=[];const scrollRequests=[];
-  const context2d = new Proxy({}, { get: (_, key) => key === 'clearRect' ? () => {translations=[];scales=[];} : key === 'translate' ? (...args)=>translations.push(args) : key === 'scale' ? (...args)=>scales.push(args) : key === 'createLinearGradient' ? () => ({ addColorStop() {} }) : () => {}, set: () => true });
+  const context2d = new Proxy({}, { get: (target, key) => target[key] ?? (key === 'clearRect' ? () => {translations=[];scales=[];} : key === 'translate' ? (...args)=>translations.push(args) : key === 'scale' ? (...args)=>scales.push(args) : key === 'createLinearGradient' ? () => ({ addColorStop() {} }) : () => {}), set: (target,key,value) => {target[key]=value;return true;} });
   function element(id) {
     if (!elements.has(id)) elements.set(id, {
       value: id === 'angle' ? '15' : id === 'part' ? 'chest' : '', style: {}, disabled: false,
@@ -40,7 +41,7 @@ function setup(AudioContext, storage, reducedMotion=true, viewport={width:900,he
       const previous=documentEvents[type];
       documentEvents[type]=event=>{previous?.(event);handler(event);};
     } };
-  const sandbox = { window: { scrollX:0,scrollY:120,scrollTo:(x,y)=>{restoredScroll=[x,y];},matchMedia:()=>({matches:reducedMotion}), AudioContext, DismountSubjects:require('../src/subjects.js'), DismountChallenges:require('../src/challenges.js'), DismountFullscreen:require('../src/fullscreen.js'), DismountAudio:require('../src/audio.js'), DismountReplay:require('../src/replay.js'), DismountPhysics: physics, DismountScores: require('../src/scores.js'), DismountCharacterArt:require('../src/character-art.js'), addEventListener(type, callback) { windowEvents[type] = callback; } }, document, devicePixelRatio: 1,
+  const sandbox = { window: { scrollX:0,scrollY:120,scrollTo:(x,y)=>{restoredScroll=[x,y];},matchMedia:()=>({matches:reducedMotion}), AudioContext, DismountEndless:endlessFx, DismountSubjects:require('../src/subjects.js'), DismountChallenges:require('../src/challenges.js'), DismountFullscreen:require('../src/fullscreen.js'), DismountAudio:require('../src/audio.js'), DismountReplay:require('../src/replay.js'), DismountPhysics: physicsApi, DismountScores: require('../src/scores.js'), DismountCharacterArt:require('../src/character-art.js'), addEventListener(type, callback) { windowEvents[type] = callback; } }, document, devicePixelRatio: 1,
     localStorage: storage || { getItem() { throw new Error('Storage disabled'); }, setItem() { throw new Error('Storage disabled'); } },
     ResizeObserver: class { observe() {} }, requestAnimationFrame(callback) { nextFrame = callback; } };
   if(url) {
@@ -668,6 +669,114 @@ test('impact notices classify contacts and dislocations without requiring motion
   assert.ok(messages.some(m=>m.includes('LANDING')));
   assert.ok(messages.some(m=>m.includes('DISLOCATION')));
   game.click('reset');assert.equal(notice.hidden,true);
+});
+
+test('endless stairs stay visible until outside the camera and retain their tread colors',()=>{
+  for(const viewport of [{width:900,height:700},{width:1600,height:500},{width:390,height:844}]) {
+    let offset=0;
+    class PosedSimulation extends physics.Simulation {
+      step() {} // Exercise camera tracking independently of collision trajectories.
+      snapshot() {
+        const frame=super.snapshot();
+        for(const point of frame.points){point.x+=offset*48;point.y+=offset*31;}
+        for(const segment of frame.segments) {
+          segment.ax+=offset*48;segment.bx+=offset*48;
+          segment.ay+=offset*31;segment.by+=offset*31;
+        }
+        return frame;
+      }
+    }
+    const game=setup(undefined,undefined,true,viewport,'https://example.com/?chamber=endless',{...physics,Simulation:PosedSimulation});
+    const ctx=game.element('game').getContext(),clear=ctx.clearRect;
+    let path=[],treads=[];const labels=[];
+    ctx.fillText=text=>labels.push(text);
+    ctx.clearRect=(...args)=>{treads=[];clear(...args);};
+    ctx.beginPath=()=>{path=[];};
+    ctx.moveTo=ctx.lineTo=(x,y)=>path.push([x,y]);
+    ctx.fill=()=>{
+      if(path.length===4&&path[1][0]===path[0][0]+48&&path[1][1]===path[0][1])treads.push({path:[...path],color:ctx.fillStyle});
+    };
+    game.click('drop');
+    for(const perspective of [true,false]) {
+      if(!perspective)game.click('view');
+      for(const position of [0,20,21,50,100,10]) {
+        offset=position;game.advance(.4);
+        const [ox,oy]=game.camera(),scale=game.zoom(),dx=perspective?115:0,dy=perspective?-68:0;
+        const drawn=new Map(treads.map(t=>[(t.path[0][0]-220)/48,t]));
+        let visible=0;
+        for(let index=0;220+index*48<=(viewport.width-ox)/scale;index++) {
+          const x=220+index*48,y=205+(index+1)*31;
+          if((x+48+dx)*scale+ox<0||y*scale+oy<0||(y+dy)*scale+oy>viewport.height)continue;
+          visible++;
+          assert.ok(drawn.has(index),`Missing visible step ${index} at ${viewport.width}px, position ${position}`);
+        }
+        assert.ok(visible>0,'The test camera sees the staircase');
+        for(const [index,tread] of drawn)assert.equal(tread.color,endlessFx.palette(index+1)[index%2?'odd':'even'],'A step retains its color as the render window shifts');
+        assert.ok(treads.length<100,'Draw only a bounded window, even far down the stairs');
+      }
+    }
+    assert.ok(labels.includes('50 STEPS ↓'),'The 50-step milestone is painted on the stairs');
+  }
+});
+
+test('endless milestone HUD, records and messages reset and follow replay without saving again',()=>{
+  class MilestoneSimulation extends physics.Simulation {
+    step() {
+      if(!this.active)return;
+      this.time+=physics.DT;this.stats.steps++;
+      if(this.stats.steps>=105)this.active=false;
+    }
+  }
+  const values=new Map(),writes=[];
+  const storage={getItem:key=>values.get(key),setItem:(key,value)=>{values.set(key,value);writes.push([key,value]);}};
+  const api={...physics,Simulation:MilestoneSimulation};
+  const game=setup(undefined,storage,true,undefined,'https://example.com/?chamber=endless',api);
+  assert.equal(game.element('endless-progress').hidden,false);
+  assert.equal(game.element('endless-next').textContent,'NEXT 50 · BEST 0');
+  game.click('drop');game.advance(.47);
+  assert.equal(game.element('endless-milestone').hidden,false);
+  assert.equal(game.element('endless-milestone-title').textContent,'NEW DEPTH RECORD · 50 STEPS');
+  assert.match(game.element('endless-next').textContent,/NEXT 100/);
+  const joke=game.element('endless-milestone-joke').textContent;
+  game.advance(.1);assert.equal(game.element('endless-milestone-joke').textContent,joke);
+  game.advance(.3);
+  assert.equal(game.element('endless-milestone-title').textContent,'NEW DEPTH RECORD · 100 STEPS');
+  game.advance(.2);
+  assert.equal(game.element('status').textContent,'EXPERIMENT COMPLETE');
+  assert.equal(values.get(endlessFx.KEY+'human'),'105');
+  game.click('reset');
+  assert.equal(game.element('endless-depth').textContent,'0 STEPS ↓');
+  assert.equal(game.element('endless-next').textContent,'NEXT 50 · BEST 105');
+  assert.equal(game.element('endless-milestone').hidden,true);
+  const writesBefore=writes.length;
+  game.click('replay');game.advance(.47);
+  assert.equal(game.element('endless-milestone-title').textContent,'MILESTONE · 50 STEPS');
+  game.element('replay-timeline').value='0';game.element('replay-timeline').events.input();
+  assert.equal(game.element('endless-milestone').hidden,true);
+  assert.equal(game.element('endless-depth').textContent,'0 STEPS ↓');
+  game.element('replay-timeline').value='100';game.element('replay-timeline').events.input();game.advance(.1);
+  assert.equal(game.element('endless-depth').textContent,'100 STEPS ↓');
+  assert.match(game.element('endless-zone').textContent,/SUBLEVEL 03/);
+  assert.equal(game.element('endless-milestone').hidden,true,'Seeking does not announce stale milestones');
+  assert.equal(writes.length,writesBefore,'Replay never updates depth records');
+  game.click('reset');game.element('layout').value='classic';game.element('layout').events.change();
+  assert.equal(game.element('endless-progress').hidden,true);
+  const reloaded=setup(undefined,storage,true,undefined,'https://example.com/?chamber=endless');
+  assert.equal(reloaded.element('endless-next').textContent,'NEXT 50 · BEST 105');
+});
+
+test('endless announcements expire without repeating, and page exit saves intermediate depth',()=>{
+  class MilestoneSimulation extends physics.Simulation {
+    step(){if(this.active){this.time+=physics.DT;this.stats.steps=Math.min(51,this.stats.steps+1);}}
+  }
+  const values=new Map(),storage={getItem:key=>values.get(key),setItem:(key,value)=>values.set(key,value)};
+  const game=setup(undefined,storage,true,undefined,'https://example.com/?chamber=endless',{...physics,Simulation:MilestoneSimulation});
+  game.click('drop');game.advance(.5);
+  assert.equal(game.element('endless-milestone').hidden,false);
+  assert.equal(values.get(endlessFx.KEY+'human'),'50');
+  game.advance(4.2);assert.equal(game.element('endless-milestone').hidden,true);
+  game.windowEvents.pagehide();assert.equal(values.get(endlessFx.KEY+'human'),'51');
+  game.click('reset');assert.equal(game.element('endless-milestone').hidden,true);
 });
 
 test('endless chamber runs, saves and replays on its own board',()=>{

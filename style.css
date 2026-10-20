@@ -207,6 +207,16 @@ button { touch-action:manipulation; }
 #settings-close { min-height:44px; width:100%; }
 .challenge-status { position:absolute; z-index:2; left:24px; bottom:94px; max-width:70%; padding:6px 10px; background:#f7f6f1e8; color:#526047; font:11px/1.5 monospace; pointer-events:none; border-left:3px solid #8e9a7d; }
 .challenge-status[data-complete="true"] { border-color:#56883a; color:#38572a; }
+.endless-progress { position:absolute; top:136px; right:18px; z-index:1; max-width:47%; text-align:right; pointer-events:none; color:#56624e; font:9px/1.6 monospace; }
+.endless-progress span,.endless-progress strong { display:block; }
+.endless-progress strong { font-size:19px; font-weight:500; }
+.endless-milestone { position:absolute; z-index:2; bottom:150px; left:50%; transform:translateX(-50%); width:min(340px,calc(100% - 32px)); padding:12px 16px; border:1px solid #c4ccbb; border-left:3px solid #8c6635; border-radius:4px; background:#f7f6f1f2; color:#3f4937; text-align:center; pointer-events:none; animation:milestone-arrive .25s ease-out; }
+.endless-milestone strong { display:block; font:11px/1.6 monospace; letter-spacing:.6px; }
+.endless-milestone span { display:block; margin-top:3px; font-size:12px; line-height:1.5; }
+.endless-progress[hidden],.endless-milestone[hidden] { display:none; }
+@keyframes milestone-arrive { from { opacity:0; transform:translate(-50%,6px); } to { opacity:1; transform:translate(-50%,0); } }
+@media(max-width:730px) { .endless-progress { top:126px; right:12px; font-size:8px; }.endless-progress strong { font-size:16px; } }
+@media(prefers-reduced-motion:reduce) { .endless-milestone { animation:none; } }
 #ghost:disabled { opacity:.5; }
 
 #game-panel { scroll-margin-top:8px; }
