@@ -15,7 +15,7 @@ function setup(AudioContext, storage, reducedMotion=true, viewport={width:900,he
   function element(id) {
     if (!elements.has(id)) elements.set(id, {
       value: id === 'angle' ? '15' : id === 'part' ? 'chest' : '', style: {}, disabled: false,
-      events: {}, options: (['layout','welcome-layout'].includes(id)?['classic','steep','long','landing','uneven','shaft','endless','finalDrop']:['character','welcome-character'].includes(id)?Object.keys(physics.CHARACTERS):['head', 'chest', 'hip', 'leftKnee', 'rightKnee', 'leftHand', 'rightHand', 'leftFoot', 'rightFoot']).map(value => ({ value })), tagName: 'DIV',
+      events: {}, options: (['layout','welcome-layout'].includes(id)?['classic','steep','long','landing','uneven','shaft','endless','finalDrop']:['character','welcome-character'].includes(id)?Object.keys(physics.CHARACTERS):['head', 'neck', 'chest', 'hip', 'leftKnee', 'rightKnee', 'leftHand', 'rightHand', 'leftFoot', 'rightFoot']).map(value => ({ value })), tagName: 'DIV',
       addEventListener(type, handler) { this.events[type] = handler; },
       capturedPointer: null,
       setPointerCapture(id) { this.capturedPointer = id; },
@@ -50,6 +50,7 @@ function setup(AudioContext, storage, reducedMotion=true, viewport={width:900,he
     sandbox.window.history={state:null,replaceState(state,title,href){sandbox.window.location.href=href;}};
   }
   sandbox.window.DismountShadow=require('../src/shadow.js');
+  sandbox.window.DismountPhysicsView=require('../src/physics-view.js');
   vm.runInNewContext(fs.readFileSync(require.resolve('../src/game.js'), 'utf8'), sandbox);
   return { host:sandbox.window, scrollRequests, element, windowEvents, url:()=>sandbox.window.location?.href, document, documentEvents, restoredScroll:()=>restoredScroll, camera:()=>translations[0], zoom:()=>scales[0]?.[0], click: id => element(id).events.click(), advance(seconds) {
     for (let frame = 0; frame < seconds * 60; frame++) { time += 1000 / 60; if (AudioContext?.instance) AudioContext.instance.currentTime = time/1000; nextFrame(time); }
@@ -505,6 +506,43 @@ test('motion tracks only after launch and can be disabled without changing physi
   animated.click('motion');assert.equal(animated.element('motion')['aria-pressed'],'false');
   assert.equal(still.element('motion')['aria-pressed'],'false');
 });
+test('physics view defaults off, follows paused replay and never changes the run',()=>{
+  class ShortSimulation extends physics.Simulation {
+    step(){super.step();if(this.time>.8)this.active=false;}
+  }
+  const api={...physics,Simulation:ShortSimulation};
+  const game=setup(undefined,undefined,true,undefined,undefined,api),plain=setup(undefined,undefined,true,undefined,undefined,api);
+  const ctx=game.element('game').getContext(),clear=ctx.clearRect;let labels=[],centerStrokes=0;
+  ctx.clearRect=(...args)=>{labels=[];centerStrokes=0;clear(...args);};
+  ctx.fillText=text=>{labels.push(text);};
+  ctx.stroke=()=>{if(ctx.strokeStyle==='#176c59')centerStrokes++;};
+  const overlayLabels=()=>labels.filter(text=>/^(COM ·|v )| N$/.test(text));
+  assert.equal(game.element('physics-view').textContent,'PHYSICS OFF');
+  assert.equal(game.element('physics-view')['aria-pressed'],'false');
+  assert.equal(game.element('physics-legend').hidden,true);
+  game.advance(.1);assert.deepEqual(overlayLabels(),[]);
+  game.click('physics-view');game.advance(.1);
+  assert.equal(game.element('physics-view')['aria-pressed'],'true');
+  assert.equal(game.element('physics-legend').hidden,false);
+  assert.ok(centerStrokes>0);assert.ok(labels.includes('v 0.00 m/s'));
+  assert.ok(!labels.some(text=>text.includes('COM')||text.endsWith(' kg')));
+  game.click('drop');plain.click('drop');game.advance(1);plain.advance(1);
+  for(const id of ['score','hits','elapsed'])assert.equal(game.element(id).textContent,plain.element(id).textContent);
+  game.click('replay');
+  const seek=index=>{game.element('replay-timeline').value=String(index);game.element('replay-timeline').events.input();game.advance(.12);};
+  seek(55);const paused=overlayLabels();assert.ok(paused.length>=1);
+  game.advance(.3);assert.deepEqual(overlayLabels(),paused);
+  seek(0);assert.ok(labels.includes('v 0.00 m/s'));assert.ok(!labels.some(text=>/ N$/.test(text)));
+  seek(55);assert.deepEqual(overlayLabels(),paused);
+  game.click('physics-view');game.advance(.12);assert.deepEqual(overlayLabels(),[]);assert.equal(centerStrokes,0);
+  game.click('reset');game.click('physics-view');game.advance(.12);
+  assert.ok(labels.includes('v 0.00 m/s'));
+  game.element('character').value='robot';game.element('character').events.change();game.advance(.12);
+  assert.ok(centerStrokes>0);assert.ok(labels.includes('v 0.00 m/s'));
+  game.click('fullscreen');game.advance(.12);assert.ok(centerStrokes>0);
+  assert.equal(setup().element('physics-view')['aria-pressed'],'false','A new page always starts with physics view off');
+});
+
 test('layout boards and saved replays are isolated and survive reload',()=>{
   const data=new Map(),storage={getItem:k=>data.get(k)||null,setItem:(k,v)=>data.set(k,v)};
   const game=setup(undefined,storage);
@@ -549,8 +587,10 @@ test('recovery meters decrease with injury, follow selection and replay, and res
   assert.equal(game.element('recovery-part-meter').value,100);
 });
 
-test('both feet can be selected on the dummy and foot runs save and replay',()=>{
-  for(const part of ['leftFoot','rightFoot']) {
+test('feet and neck can be selected on the dummy and their runs save and replay',()=>{
+  const markup=fs.readFileSync(require.resolve('../index.html'),'utf8');
+  assert.match(markup,/<select id="part">[^]*?<option value="neck">Neck<\/option>/);
+  for(const part of ['leftFoot','rightFoot','neck']) {
     const data=new Map(),storage={getItem:k=>data.get(k)||null,setItem:(k,v)=>data.set(k,v)};
     const game=setup(undefined,storage);game.advance(.1);
     const p=new physics.Simulation().points.find(p=>p.name===part),[ox,oy]=game.camera(),scale=game.zoom();
@@ -566,6 +606,12 @@ test('both feet can be selected on the dummy and foot runs save and replay',()=>
     reloaded.element('score-rows').events.click({target:{closest:()=>button}});reloaded.advance(23);
     assert.equal(reloaded.element('score').textContent,score);
     assert.equal(reloaded.element('result-title').textContent,'Replay · FOO');
+    if(part==='neck') {
+      reloaded.click('retry-edit');reloaded.advance(.1);
+      assert.equal(reloaded.element('part').value,'neck');
+      reloaded.click('preset-launch');reloaded.advance(20);
+      assert.equal(reloaded.element('score').textContent,score);
+    }
   }
 });
 

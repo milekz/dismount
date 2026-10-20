@@ -41,7 +41,7 @@
   }
   const {CHARACTERS}=profiles;
   const excludedContacts = new Set(['head:torso','pelvis:torso','abdomen:leftThigh','abdomen:rightThigh','leftUpperArm:neckLink','neckLink:rightUpperArm']);
-  const pointNames = ['head','chest','hip','leftElbow','leftHand','rightElbow','rightHand','leftKnee','leftFoot','rightKnee','rightFoot'];
+  const pointNames = ['head','chest','hip','leftElbow','leftHand','rightElbow','rightHand','leftKnee','leftFoot','rightKnee','rightFoot','neck'];
   const v = (x, y) => Vec2(x / PPM, y / PPM);
   const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
 
@@ -49,6 +49,7 @@
     constructor(layout='classic',character='human',engine=REPLAY_VERSION) {
       if(legacy.supportsReplay({engine,character}))return new legacy.Simulation(layout,character,engine);
       if(engine!==REPLAY_VERSION&&engine!=='rigid-3.0.0')throw new Error('Unsupported physics version: '+engine);
+      this.engine=engine;
       this.progressScoring=engine!=='rigid-3.0.0';
       this.layout=Object.hasOwn(LAYOUTS,layout)?layout:'classic';
       this.character=Object.hasOwn(CHARACTERS,character)?character:'human';
@@ -225,6 +226,10 @@
         this.endpoints(this.bodyByName.leftThigh)[1],this.bodyByName.leftFoot.body.getWorldCenter(),
         this.endpoints(this.bodyByName.rightThigh)[1],this.bodyByName.rightFoot.body.getWorldCenter()];
       const owners = ['head','torso','pelvis','leftUpperArm','leftHand','rightUpperArm','rightHand','leftThigh','leftFoot','rightThigh','rightFoot'];
+      // Append new targets so existing joint-marker indices and historical snapshots stay intact.
+      if(this.engine!=='rigid-3.0.0') {
+        positions.push(this.bodyByName.neckLink.body.getWorldCenter());owners.push('neckLink');
+      }
       this.points = positions.map((p,i) => ({name:pointNames[i],x:p.x*PPM,y:p.y*PPM,
         flash:this.bodyByName[owners[i]].flash,bodyName:owners[i]}));
     }
@@ -238,7 +243,7 @@
       const impulse = this.bodies.reduce((sum,s)=>sum+s.mass,0)*4.6*strength;
       this.pendingPush = strength ? {body:segment.body,local:segment.body.getLocalPoint(v(point.x,point.y)),
         x:Math.cos(rad)*impulse,y:-Math.sin(rad)*impulse,remaining:0.2,
-        fineSteps:strength>.8&&/Hand|Foot/.test(segment.name)} : null;
+        fineSteps:strength>.8&&/Hand|Foot|neckLink/.test(segment.name)} : null;
       this.active = true;
       for (const segment of this.bodies) segment.body.setAwake(true);
     }
@@ -382,7 +387,7 @@
       if(this.layout==='endless')this.extendEndlessStairs();
       this.impacts=[];this.cracks=[];this.pendingImpacts.clear();
       for (const s of this.bodies) { s.cooldown=Math.max(0,s.cooldown-DT);s.flash=Math.max(0,s.flash-DT*2); }
-      // Tiny end segments need finer integration during a strong localized push.
+      // Small segments need finer integration during a strong localized push.
       const substeps=this.pendingPush?.fineSteps?24:SUBSTEPS,h=DT/substeps;
       for (let sub=0;sub<substeps;sub++) {
         if (this.pendingPush) {

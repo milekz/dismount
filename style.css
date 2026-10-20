@@ -200,6 +200,12 @@ button { touch-action:manipulation; }
 .result>#result-quip { font:12px/1.6 Arial,Helvetica,sans-serif; letter-spacing:0; color:#626d56; margin:12px 0; }
 .scoreboard>#score-breakdown { letter-spacing:0; line-height:1.4; }
 .result>#result-score-breakdown { font:11px/1.5 monospace; letter-spacing:0; color:#526047; }
+.physics-legend { display:flex; flex-wrap:wrap; flex-shrink:0; gap:6px 16px; margin-top:8px; padding:9px 12px; background:#f7f6f1; border:1px solid #d7d8ce; border-radius:4px; font:11px/1.5 monospace; }
+.physics-legend[hidden] { display:none; }
+.physics-legend>span:first-child { color:#176c59; }
+.physics-legend>span:nth-child(2) { color:#2166a5; }
+.physics-legend>span:nth-child(3) { color:#bc4a2c; }
+.physics-legend>small { flex-basis:100%; color:#626d56; font-size:10px; }
 
 /* In-stage settings stay inside native fullscreen and reuse the same controls. */
 #game-panel { position:relative; }

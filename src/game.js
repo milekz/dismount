@@ -3,6 +3,7 @@
   'use strict';
   const {Simulation, LAYOUTS, CHARACTERS, buildStair, DT, REPLAY_VERSION, supportsReplay} = window.DismountPhysics;
   const {Recording,validEnd}=window.DismountReplay;
+  const physicsView=window.DismountPhysicsView;
   const {ScoreBoard, normalizeNick} = window.DismountScores;
   let storage;
   try { storage = localStorage; } catch (_) {}
@@ -23,7 +24,7 @@
   let board=new ScoreBoard(storage,REPLAY_VERSION,layout,character);
   const boards=new Map([[selectionKey(),board]]), bests=new Map();
   let sim = new Simulation(layout,character);
-  let selectedBody='torso', motion=false, injuryRings=false, injuryLabels=true;
+  let selectedBody='torso', motion=false, injuryRings=false, injuryLabels=true,showPhysics=false;
   try { injuryRings=storage?.getItem('dismount-injury-rings')==='on'; } catch (_) { /* Optional preference. */ }
   try { injuryLabels=storage?.getItem('dismount-injury-labels')!=='off'; } catch (_) { /* Optional preference. */ }
   const motionEnabled=()=>motion&&layout!=='endless';
@@ -44,7 +45,7 @@
   const groups = ['Head', 'Torso', 'Arms', 'Legs'];
   let mode = 'ready', power = 0, meterTime = 0, accumulator = 0, last = 0;
   let frames = new Recording(), replayIndex = 0, slow = false, perspective = true, best = 0;
-  let particles = [], current = sim.snapshot();
+  let particles = [], current = physicsView.snapshot(sim);
   const audioFx=window.DismountAudio.createAudio({host:window,storage,getSubject:()=>current.character,onChange:label=>updateSoundControls(label)});
   const tone=(...args)=>audioFx.tone(...args),unlockAudio=()=>audioFx.unlock();
   let launchPress = null, suppressLaunchClick = false;
@@ -305,6 +306,7 @@
       ctx.fillStyle=color;ctx.font='bold 12px monospace';
       if(injuryLabels) ctx.fillText(p.label,p.x+10,p.y-10-(1-p.life)*24);
     }
+    if(showPhysics)physicsView.draw(ctx,current.physics,scale);
     ctx.globalAlpha=1;ctx.restore();
   }
   const damagePoints=()=>groups.reduce((sum,group)=>sum+current.damage[group],0);
@@ -401,6 +403,15 @@
   $('injury-labels').addEventListener('click',()=>{
     injuryLabels=!injuryLabels;updateInjuryLabelsToggle();
     try { storage?.setItem('dismount-injury-labels',injuryLabels?'on':'off'); } catch (_) { /* Works without storage. */ }
+  });
+  function updatePhysicsToggle() {
+    $('physics-view').textContent=showPhysics?'PHYSICS ON':'PHYSICS OFF';
+    $('physics-view').setAttribute('aria-pressed',String(showPhysics));
+    $('physics-legend').hidden=!showPhysics;
+  }
+  updatePhysicsToggle();
+  $('physics-view').addEventListener('click',()=>{
+    showPhysics=!showPhysics;updatePhysicsToggle();lastDraw=-Infinity;
   });
   function updateMotionToggle() {
     $('motion').disabled=layout==='endless';
@@ -566,7 +577,7 @@
     cancelDrag();
     mode='ready';
     sim.reset();
-    current=sim.snapshot();
+    current=physicsView.snapshot(sim);
     particles=[];
     accumulator=0;
     power=0;
@@ -599,7 +610,7 @@
     runPush=preset?{part:preset.part,angle:preset.angle,power:preset.power}:{part:$('part').value,angle:Number($('angle').value),power};
     if(attemptCompleted&&frames.length){ghostFrames=frames;attemptCompleted=false;updateGhost();}
     $('settings-drawer').hidden=true;$('settings-toggle').setAttribute('aria-expanded','false');
-    pendingScore=null;mode='running';lock(true);frames=new Recording();frames.push(sim.snapshot());sim.push(runPush.part,runPush.angle,runPush.power);accumulator=0;
+    pendingScore=null;mode='running';lock(true);frames=new Recording();frames.push(physicsView.snapshot(sim));sim.push(runPush.part,runPush.angle,runPush.power);accumulator=0;
     $('status').textContent='DISMOUNT IN PROGRESS';$('launch').textContent='Experiment in progress…';$('launch').disabled=true;$('hint').textContent='GRAVITY HAS TAKEN OVER.';$('power-help').textContent='Push locked. Watch the impacts accumulate.';
   }
   // Presentation-only randomness: never used by the simulation or replay recipes.
@@ -840,7 +851,7 @@
     const started=window.performance?.now();
     for(let i=0;i<30&&job.steps<job.entry.steps;i++) {
       if(i>0&&started!==undefined&&window.performance.now()-started>=8)break;
-      job.sim.step();const frame=job.sim.snapshot();frame.impacts=job.sim.impacts.map(hit=>({...hit}));
+      physicsView.step(job.sim);const frame=physicsView.snapshot(job.sim);frame.impacts=job.sim.impacts.map(hit=>({...hit}));
       job.frames.push(frame);job.steps++;
     }
     $('status').textContent='PREPARING REPLAY · '+Math.round(job.steps/job.entry.steps*100)+'%';
@@ -865,7 +876,7 @@
       job.worker?.terminate();job.worker=null;
       if(replayJob!==job)return;
       job.sim=new Simulation(entry.layout||'classic',entry.character||'human',entry.engine);
-      job.frames=new Recording();job.frames.push(job.sim.snapshot());job.steps=0;
+      job.frames=new Recording();job.frames.push(physicsView.snapshot(job.sim));job.steps=0;
       job.sim.push(entry.push.part,entry.push.angle,entry.push.power);
     };
     try {
@@ -939,7 +950,7 @@
       while(accumulator>=DT&&(mode==='running'||(mode==='replay'&&!replayPaused))){
         accumulator-=DT;const previous=current;
         if(mode==='running'){
-          sim.step();current=sim.snapshot();current.impacts=sim.impacts.map(hit=>({...hit}));frames.push(current);
+          physicsView.step(sim);current=physicsView.snapshot(sim);current.impacts=sim.impacts.map(hit=>({...hit}));frames.push(current);
           showFrameEvents(current,previous);
           if(!sim.active)finish();
         }else{

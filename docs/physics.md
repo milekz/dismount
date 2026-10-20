@@ -81,6 +81,15 @@ biomechanical accuracy.
 
 ## Replays and records
 
+The optional physics view observes solver impulses without changing the simulation.
+It sums environment normal and friction impulses per body over a 120 Hz tick,
+then divides by the elapsed simulation time to show average force in newtons.
+Up to four strongest body resultants are retained, along with the mass-weighted
+COM and velocity. Internal body contacts are excluded. These force values are
+separate from the arcade `impact.force` severity used for scoring and sound.
+Compact recordings retain telemetry for exact timeline seeking; the display
+starts disabled and has no effect on replay versioning or rankings.
+
 `src/physics-legacy.js` freezes the published 2.3 solver for all subjects and the
 2.2 Human schedule. Both worker and main-thread replay reconstruction dispatch
 by recipe version. Regression hashes protect historical trajectories.

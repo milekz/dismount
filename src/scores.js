@@ -4,7 +4,7 @@
   const KEY = 'dismount-scoreboard-v4', PREVIOUS_KEY='dismount-scoreboard-v3',
     PREVIOUS_KEYS=[PREVIOUS_KEY,'dismount-scoreboard-v2'], LIMIT = 10;
   const CHARACTERS=['human','robot','knight','skeleton','inflatable'];
-  const PARTS = ['head','chest','hip','leftKnee','rightKnee','leftHand','rightHand','leftFoot','rightFoot'];
+  const PARTS = ['head','neck','chest','hip','leftKnee','rightKnee','leftHand','rightHand','leftFoot','rightFoot'];
   const normalizeNick = value => String(value).toUpperCase().replace(/[^A-Z]/g,'').slice(0,3);
   function validEntry(entry) {
     return entry && typeof entry.id === 'string' && /^[a-z0-9-]{1,80}$/.test(entry.id)

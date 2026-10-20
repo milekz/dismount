@@ -5,6 +5,7 @@
   const segmentFields=['ax','ay','bx','by','angle','flash','damage','hits'];
   const jointFields=['x','y','broken','damage'];
   const statFields=['steps','distance','maxSpeed','airtime','maxFlightSteps'];
+  const physicsFields=['x','y','vx','vy','mass'],contactFields=['x','y','fx','fy'],MAX_CONTACTS=4;
   const groups=['Head','Torso','Arms','Legs'], CHUNK=128;
   const metadata=(items,fields)=>items.map(item=>Object.fromEntries(Object.entries(item).filter(([key])=>!fields.includes(key))));
   class Recording {
@@ -13,6 +14,7 @@
       if(!this.meta) {
         this.meta={layout:frame.layout,character:frame.character,points:metadata(frame.points,pointFields),segments:metadata(frame.segments,segmentFields),joints:metadata(frame.joints,jointFields)};
         this.stride=4+groups.length+statFields.length+frame.points.length*pointFields.length+frame.segments.length*segmentFields.length+frame.joints.length*jointFields.length;
+        if(frame.physics){this.meta.physics=true;this.stride+=physicsFields.length+1+MAX_CONTACTS*contactFields.length;}
       }
       const chunk=Math.floor(this.length/CHUNK);
       if(!this.chunks[chunk])this.chunks[chunk]=new Float64Array(CHUNK*this.stride);
@@ -24,6 +26,11 @@
       for(const field of statFields)data[i++]=frame.stats?.[field]||0;
       for(const [items,fields] of [[frame.points,pointFields],[frame.segments,segmentFields],[frame.joints,jointFields]])
         for(const item of items)for(const field of fields)data[i++]=Number(item[field]);
+      if(this.meta.physics) {
+        for(const field of physicsFields)data[i++]=frame.physics[field];
+        const contacts=frame.physics.contacts.slice(0,MAX_CONTACTS);data[i++]=contacts.length;
+        for(let j=0;j<MAX_CONTACTS;j++)for(const field of contactFields)data[i++]=contacts[j]?.[field]??0;
+      }
       if(frame.impacts?.length||frame.cracks?.length)this.events.set(this.length,{impacts:frame.impacts||[],cracks:frame.cracks||[]});
       for(const hit of frame.impacts||[])if(hit.points>this.peakPoints){this.peakPoints=hit.points;this.peakIndex=this.length;}
       this.length++;
@@ -39,6 +46,14 @@
       frame.stats={};for(const field of statFields)frame.stats[field]=data[i++];
       for(const [key,fields] of [['points',pointFields],['segments',segmentFields],['joints',jointFields]])
         frame[key]=this.meta[key].map(item=>{const result={...item};for(const field of fields){const value=data[i++];result[field]=field==='broken'?!!value:value;}return result;});
+      if(this.meta.physics) {
+        frame.physics={};for(const field of physicsFields)frame.physics[field]=data[i++];
+        const count=data[i++];frame.physics.contacts=[];
+        for(let j=0;j<MAX_CONTACTS;j++) {
+          const contact={};for(const field of contactFields)contact[field]=data[i++];
+          if(j<count)frame.physics.contacts.push(contact);
+        }
+      }
       const events=this.events.get(index);frame.impacts=events?.impacts||[];frame.cracks=events?.cracks||[];
       this.readIndex=index;this.readFrame=frame;return frame;
     }

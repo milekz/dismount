@@ -37,15 +37,21 @@ test('challenges enforce power, flight and chamber requirements',()=>{
 
 test('browser worker script reconstructs a transferable recording with a matching result',()=>{
   const vm=require('node:vm'),fs=require('node:fs'),path=require('node:path');
-  const sim=new Simulation();sim.push('chest',15,.8);let steps=0;
-  while(sim.active){sim.step();steps++;}
-  const entry={...sim.snapshot(),steps,push:{part:'chest',angle:15,power:.8}};
   const messages=[],sandbox={performance:require('node:perf_hooks').performance,postMessage:message=>messages.push(message)};
   sandbox.self=sandbox;const context=vm.createContext(sandbox);
   sandbox.importScripts=(...names)=>{for(const name of names)vm.runInContext(fs.readFileSync(path.resolve(__dirname,'../src',name),'utf8'),context);};
   vm.runInContext(fs.readFileSync(path.resolve(__dirname,'../src/replay-worker.js'),'utf8'),context);
-  sandbox.onmessage({data:entry});const result=messages.at(-1);
-  assert.ok(!result.error,result.error);assert.equal(validEnd(Recording.from(result.recording),entry),true);
+  for(const push of [{part:'chest',angle:15,power:.8},{part:'neck',angle:6,power:1}]) {
+    const sim=new Simulation();sim.push(push.part,push.angle,push.power);let steps=0;
+    while(sim.active){sim.step();steps++;}
+    const entry={...sim.snapshot(),steps,push};
+    sandbox.onmessage({data:entry});const result=messages.at(-1);
+    assert.ok(!result.error,result.error);
+    const recording=Recording.from(result.recording);
+    assert.equal(validEnd(recording,entry),true);
+    assert.equal(recording.at(0).physics.mass,73);
+    assert.ok(recording.at(-1).physics.contacts.length<=4);
+  }
 });
 
 test('worker selects the frozen solver for historical recipes of every subject',()=>{
