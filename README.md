@@ -30,7 +30,7 @@ Toggle half speed and side/perspective views using the controls. Impact sounds u
 
 ## Layouts and motion effects
 
-**NIGHT: SYSTEM / ON / OFF** in the stage toolbar controls appearance. System is the default and follows live changes to your device's light/dark setting. Click to switch appearance manually, then cycle back to System to resume automatic switching. Your choice is saved in this browser. Night mode covers the game scene, all chamber palettes, menus, damage map, physics overlay, welcome dialog and fullscreen; switching it preserves the current run and replay position.
+**NIGHT: SYSTEM / ON / OFF** in the page header, next to **SOUND ON/OFF**, controls appearance. System is the default and follows live changes to your device's light/dark setting. Click to switch appearance manually, then cycle back to System to resume automatic switching. Your choice is saved in this browser. Night mode covers the game scene, all chamber palettes, menus, damage map, physics overlay, welcome dialog and fullscreen; switching it preserves the current run and replay position.
 
 Choose a layout before starting: **Classic** (14 steps), **Short & steep** (8), **Long & shallow** (18), **Split flight** (14 with a wide intermediate landing), **Uneven Steps**, **The Shaft**, **Endless Stairs** (the default), or **Final Drop**. The selector is locked during a push or replay. Switching layouts resets the scene and clears the last-attempt recording; saved leaderboard replays remain available in their own layout.
 

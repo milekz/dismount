@@ -138,6 +138,8 @@ main:has(> .intro[hidden]) { padding-top:16px; }
 #game-panel:fullscreen .run-stats,#game-panel:fullscreen .replay-controls { flex-shrink:0; }
 @media(max-width:420px) { .run-stats { gap:10px; padding:10px; grid-template-columns:repeat(2,minmax(0,1fr)); } }
 
+.header-controls { display:flex; align-items:center; gap:8px; flex-shrink:0; }
+.header-controls button { white-space:nowrap; }
 /* Mobile controls: keep a clear stage and allow the toolbar to scroll sideways. */
 button { touch-action:manipulation; }
 #launch { touch-action:none; user-select:none; -webkit-user-select:none; -webkit-touch-callout:none; }
@@ -172,11 +174,18 @@ button { touch-action:manipulation; }
   .replay-buttons label { margin:0; }
 }
 @media(max-width:730px) {
-  header { height:56px; padding:0 max(12px,env(safe-area-inset-left)); }
+  header { height:56px; padding:0 max(12px,env(safe-area-inset-left)); gap:12px; }
   main { padding:10px max(10px,env(safe-area-inset-left)) 20px; }
   main:has(> .intro[hidden]) { padding-top:10px; }
   .arena { height:clamp(360px,calc(100svh - 146px),620px); min-height:360px; }
   .welcome-dialog { max-height:calc(100dvh - 24px); }
+}
+@media(max-width:420px) {
+  header { gap:8px; }
+  .brand { font-size:15px; gap:7px; }
+  .brand-icon { width:28px; height:28px; font-size:24px; line-height:26px; }
+  .header-controls { gap:6px; }
+  .header-controls button { font-size:9px; letter-spacing:.4px; padding:8px; }
 }
 /* Native fullscreen and the mobile full-window fallback share the same layout. */
 #game-panel:is(:fullscreen,:-webkit-full-screen,[data-expanded="true"]) {
