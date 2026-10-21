@@ -34,7 +34,7 @@ function setup(AudioContext, storage, reducedMotion=true, viewport={width:900,he
   const windowEvents = {}, documentEvents = {};
   let restoredScroll=null;
   let serial=0;
-  const document = { body:{style:{position:'',top:'',width:'',overflow:''}},
+  const document = { documentElement:element('root'),body:{style:{position:'',top:'',width:'',overflow:''}},
     querySelectorAll:()=>[element('page-header'),element('outside-controls')],
     getElementById: element, createElement: () => element('row-'+serial++),
     addEventListener(type,handler) {
@@ -51,6 +51,9 @@ function setup(AudioContext, storage, reducedMotion=true, viewport={width:900,he
   }
   sandbox.window.DismountShadow=require('../src/shadow.js');
   sandbox.window.DismountPhysicsView=require('../src/physics-view.js');
+  const theme=require('../src/theme.js');
+  const themeHost={matchMedia:()=>({matches:false}),addEventListener(){}};
+  sandbox.window.DismountTheme={...theme,current:theme.createTheme({host:themeHost,document,storage:sandbox.localStorage})};
   vm.runInNewContext(fs.readFileSync(require.resolve('../src/game.js'), 'utf8'), sandbox);
   return { host:sandbox.window, scrollRequests, element, windowEvents, url:()=>sandbox.window.location?.href, document, documentEvents, restoredScroll:()=>restoredScroll, camera:()=>translations[0], zoom:()=>scales[0]?.[0], click: id => element(id).events.click(), advance(seconds) {
     for (let frame = 0; frame < seconds * 60; frame++) { time += 1000 / 60; if (AudioContext?.instance) AudioContext.instance.currentTime = time/1000; nextFrame(time); }
@@ -506,6 +509,43 @@ test('motion tracks only after launch and can be disabled without changing physi
   animated.click('motion');assert.equal(animated.element('motion')['aria-pressed'],'false');
   assert.equal(still.element('motion')['aria-pressed'],'false');
 });
+test('night mode recolors every chamber and the report without moving the camera, including fullscreen',()=>{
+  const game=setup(),ctx=game.element('game').getContext();let background;
+  ctx.createLinearGradient=()=>({stops:[],addColorStop(offset,color){this.stops.push(color);}});
+  ctx.fillRect=()=>{if(ctx.fillStyle?.stops)background=[...ctx.fillStyle.stops];};
+  const appearance=game.host.DismountTheme.current;
+  assert.equal(game.element('theme-toggle').textContent,'NIGHT: SYSTEM');
+  for(const layout of Object.keys(physics.LAYOUTS)) {
+    game.element('layout').value=layout;game.element('layout').events.change();
+    appearance.setMode('light');game.advance(.12);
+    const light=[...background],camera=[...game.camera()],zoom=game.zoom();
+    appearance.setMode('dark');game.advance(.12);
+    assert.notDeepEqual(background,light);assert.deepEqual(game.camera(),camera);assert.equal(game.zoom(),zoom);
+    assert.equal(game.document.documentElement['data-theme'],'dark');
+    assert.equal(game.element('map-head').fill,appearance.scene.intact);
+    appearance.setMode('light');game.advance(.12);assert.deepEqual(background,light);
+  }
+  appearance.setMode('system');game.click('theme-toggle');game.advance(.12);
+  assert.equal(game.element('theme-toggle').textContent,'NIGHT: ON');
+  game.click('fullscreen');game.advance(.12);assert.equal(appearance.dark,true);
+});
+
+test('night preference survives reload and switching it during runs and paused replays preserves the result',()=>{
+  class ShortSimulation extends physics.Simulation {step(){super.step();if(this.time>.8)this.active=false;}}
+  const api={...physics,Simulation:ShortSimulation},data=new Map(),storage={getItem:k=>data.get(k)||null,setItem:(k,v)=>data.set(k,v)};
+  const game=setup(undefined,storage,true,undefined,undefined,api),plain=setup(undefined,undefined,true,undefined,undefined,api);
+  game.click('drop');plain.click('drop');game.advance(.2);plain.advance(.2);
+  game.click('theme-toggle');game.advance(1);plain.advance(1);
+  for(const id of ['score','elapsed','hits'])assert.equal(game.element(id).textContent,plain.element(id).textContent);
+  assert.equal(setup(undefined,storage).host.DismountTheme.current.dark,true);
+  game.click('replay');game.element('replay-timeline').value='50';game.element('replay-timeline').events.input();game.advance(.12);
+  const score=game.element('score').textContent,time=game.element('elapsed').textContent;
+  game.click('theme-toggle');game.advance(.12);
+  assert.equal(game.element('score').textContent,score);assert.equal(game.element('elapsed').textContent,time);
+  assert.equal(Number(game.element('replay-timeline').value),50);
+  game.click('reset');assert.equal(game.host.DismountTheme.current.mode,'light');
+});
+
 test('physics view defaults off, follows paused replay and never changes the run',()=>{
   class ShortSimulation extends physics.Simulation {
     step(){super.step();if(this.time>.8)this.active=false;}

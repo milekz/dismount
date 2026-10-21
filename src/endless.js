@@ -9,6 +9,12 @@
     ['Forgotten basement',0xebe4f0,0xd8cfe3,0xbcaec9,0xb0a1bf,0xe7dfee,0xddd3e7,0xa494b5,0x705680,0x815a95],
     ['Geology department',0xf1e7db,0xe4d2bb,0xccb596,0xc2aa88,0xeee0ca,0xe5d4b9,0xb49a74,0x7b603e,0x9b5c32]
   ];
+  const nightZones=[
+    ['Atrium',0x171e22,0x11181c,0x34423e,0x293732,0x4e6053,0x45564b,0x637566,0xb7c8ab,0xe2b376],
+    ['Maintenance',0x17222c,0x111a22,0x30485a,0x293d4e,0x4e697d,0x435d71,0x69879a,0xc1d9e7,0x85c5ec],
+    ['Forgotten basement',0x231d2c,0x191520,0x483951,0x392e43,0x62526f,0x554562,0x877395,0xdbc6e7,0xd7a9ec],
+    ['Geology department',0x2c231c,0x201912,0x594736,0x48382a,0x756047,0x68533d,0x9b835f,0xead7b6,0xefb17e]
+  ];
   const jokes=[
     'Gravity has renewed your subscription.',
     'The elevator would like a word.',
@@ -25,16 +31,18 @@
   ];
   const steps=frame=>Math.max(0,Math.floor(frame.stats?.steps||0));
   const paletteCache=new Map();
-  function palette(depth) {
-    if(paletteCache.has(depth))return paletteCache.get(depth);
+  function palette(depth,dark=false) {
+    const key=(dark?'dark:':'light:')+depth;
+    if(paletteCache.has(key))return paletteCache.get(key);
     const position=Math.max(0,depth)/INTERVAL,zone=Math.floor(position),fraction=position-zone;
-    const blend=fraction*fraction*(3-2*fraction),a=zones[zone%zones.length],b=zones[(zone+1)%zones.length];
+    const paletteZones=dark?nightZones:zones;
+    const blend=fraction*fraction*(3-2*fraction),a=paletteZones[zone%zones.length],b=paletteZones[(zone+1)%zones.length];
     const result={zone:zone+1,name:a[0]};
     colors.forEach((name,i)=>{
       const rgb=[16,8,0].map(shift=>Math.round(((a[i+1]>>shift)&255)*(1-blend)+((b[i+1]>>shift)&255)*blend));
       result[name]='#'+rgb.map(value=>value.toString(16).padStart(2,'0')).join('');
     });
-    paletteCache.set(depth,result);
+    paletteCache.set(key,result);
     if(paletteCache.size>256)paletteCache.delete(paletteCache.keys().next().value);
     return result;
   }

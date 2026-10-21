@@ -3,9 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#edece6">
+  <meta id="theme-color" name="theme-color" content="#edece6">
   <title>Stair Dismount — Impact Laboratory</title>
+  <script src="src/theme.js"></script>
   <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="theme.css">
   <script defer src="vendor/planck-1.5.0.js"></script>
   <script defer src="src/physics-legacy.js"></script>
   <script defer src="src/body-profiles.js"></script>
@@ -40,7 +42,7 @@
           <label for="initials">TOP 10 — ENTER YOUR INITIALS</label>
           <div class="initials-row"><input id="initials" name="initials" type="text" maxlength="3" minlength="3" pattern="[A-Za-z]{3}" autocomplete="off" autocapitalize="characters" spellcheck="false" required placeholder="AAA" aria-label="Three-letter initials"><button id="save-score" type="submit">Save score</button></div>
         </form><p id="save-message" role="status"></p><button id="again">Try another push ↗</button><p>OR CLICK ANYWHERE ON THE STAGE</p></div>
-        <div class="arena-bottom"><span id="hint">SET YOUR PUSH. LET PHYSICS DO THE REST.</span><div class="view-buttons" role="group" aria-label="Game display and sound controls"><button id="settings-toggle" class="small-button" aria-expanded="false" aria-controls="settings-drawer" hidden>SETTINGS</button><button id="ghost" class="small-button" aria-pressed="false" disabled>GHOST OFF</button><button id="fullscreen" class="small-button" aria-pressed="false">FULLSCREEN</button><button id="stage-sound" class="small-button" aria-pressed="true">SOUND ON</button><button id="view" class="small-button">VIEW: PERSPECTIVE</button><button id="injury-rings" class="small-button" aria-pressed="false" title="Show or hide injury and impact circles on the character">INJURY RINGS OFF</button><button id="injury-labels" class="small-button" aria-pressed="true" title="Show or hide injury descriptions on the stage">INJURY TEXT ON</button><button id="motion" class="small-button" aria-pressed="false">MOTION FX OFF</button><button id="physics-view" class="small-button" type="button" aria-pressed="false" aria-controls="physics-legend" title="Show center of mass, velocity and contact forces">PHYSICS OFF</button><button id="slow" class="small-button" aria-pressed="false">½ SPEED</button></div></div>
+        <div class="arena-bottom"><span id="hint">SET YOUR PUSH. LET PHYSICS DO THE REST.</span><div class="view-buttons" role="group" aria-label="Game display and sound controls"><button id="settings-toggle" class="small-button" aria-expanded="false" aria-controls="settings-drawer" hidden>SETTINGS</button><button id="ghost" class="small-button" aria-pressed="false" disabled>GHOST OFF</button><button id="fullscreen" class="small-button" aria-pressed="false">FULLSCREEN</button><button id="stage-sound" class="small-button" aria-pressed="true">SOUND ON</button><button id="theme-toggle" class="small-button" type="button" title="Follow your system theme or choose dark or light">NIGHT: SYSTEM</button><button id="view" class="small-button">VIEW: PERSPECTIVE</button><button id="injury-rings" class="small-button" aria-pressed="false" title="Show or hide injury and impact circles on the character">INJURY RINGS OFF</button><button id="injury-labels" class="small-button" aria-pressed="true" title="Show or hide injury descriptions on the stage">INJURY TEXT ON</button><button id="motion" class="small-button" aria-pressed="false">MOTION FX OFF</button><button id="physics-view" class="small-button" type="button" aria-pressed="false" aria-controls="physics-legend" title="Show center of mass, velocity and contact forces">PHYSICS OFF</button><button id="slow" class="small-button" aria-pressed="false">½ SPEED</button></div></div>
       </section>
       <div id="physics-legend" class="physics-legend" hidden><span>⊕ Center of mass</span><span>→ Velocity · m/s</span><span>→ Contact force · N</span><small>Contacts combined per body part · max 4 arrows · forces averaged per frame · arrow lengths capped</small></div>
       <dl class="run-stats" aria-label="Run statistics">

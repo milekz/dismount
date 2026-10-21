@@ -26,6 +26,16 @@ test('depth palettes are continuous across milestones and deterministic when see
   assert.deepEqual(palette(0),initial);
 });
 
+test('night depth palettes keep zone transitions continuous without contaminating the light cache',()=>{
+  const original=palette(100),night=palette(100,true);
+  assert.notEqual(original.backgroundTop,night.backgroundTop);assert.equal(original.name,night.name);
+  for(const boundary of [50,100,150,200]) {
+    const a=palette(boundary-.01,true),b=palette(boundary+.01,true);
+    for(const key of ['backgroundTop','backgroundBottom','even','odd','side'])assert.equal(a[key],b[key]);
+  }
+  assert.deepEqual(palette(100),original);assert.deepEqual(palette(100,true),night);
+});
+
 test('depth records persist per character and batch writes without lowering existing records',()=>{
   const values=new Map(),writes=[],storage={getItem:key=>values.get(key),setItem:(key,value)=>{values.set(key,value);writes.push(key);}};
   const records=createRecords(storage);

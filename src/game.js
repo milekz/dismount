@@ -4,6 +4,7 @@
   const {Simulation, LAYOUTS, CHARACTERS, buildStair, DT, REPLAY_VERSION, supportsReplay} = window.DismountPhysics;
   const {Recording,validEnd}=window.DismountReplay;
   const physicsView=window.DismountPhysicsView;
+  const appearance=window.DismountTheme.current;
   const {ScoreBoard, normalizeNick} = window.DismountScores;
   let storage;
   try { storage = localStorage; } catch (_) {}
@@ -81,9 +82,10 @@
   function circle(x,y,r,color) { ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.fillStyle=color;ctx.fill(); }
   function render() {
     ctx.clearRect(0,0,width,height);
+    const night=appearance.dark,scene=appearance.scene;
     const endless=(current.layout||layout)==='endless';
-    const atmosphere=endless?endlessFx.palette(endlessFx.steps(current)):null;
-    const backgroundTop=atmosphere?.backgroundTop||'#e7e9e0',backgroundBottom=atmosphere?.backgroundBottom||'#dce0d2';
+    const atmosphere=endless?endlessFx.palette(endlessFx.steps(current),night):null;
+    const backgroundTop=atmosphere?.backgroundTop||scene.backgroundTop,backgroundBottom=atmosphere?.backgroundBottom||scene.backgroundBottom;
     const key=backgroundTop+backgroundBottom;
     if(!backgroundGradient||backgroundKey!==key) {
       backgroundGradient=ctx.createLinearGradient(0,0,width,height);
@@ -138,23 +140,23 @@
     const jitter=motionEnabled()?Math.min(3,shake*12):0;
     ctx.save();ctx.translate(offsetX+Math.sin(last*.071)*jitter,offsetY+Math.cos(last*.093)*jitter);ctx.scale(scale,scale);
     if(!endless) {
-      ctx.strokeStyle='#cbd1c1';ctx.lineWidth=1;
+      ctx.strokeStyle=scene.grid;ctx.lineWidth=1;
       for(let x=-200;x<1700;x+=80){ctx.beginPath();ctx.moveTo(x,stair.floor+61);ctx.lineTo(x+450,stair.floor-199);ctx.stroke();}
       for(let y=stair.floor+11;y<stair.floor+211;y+=35){ctx.beginPath();ctx.moveTo(-150,y);ctx.lineTo(1700,y);ctx.stroke();}
     }
     if(stair.kind==='shaft') {
       const block=(x,y,w,h,color)=>{
-        polygon([[x,y],[x+w,y],[x+w,y+h],[x,y+h]],color,'#a2af93');
-        polygon([[x,y],[x+w,y],[x+w+depthX,y+depthY],[x+depthX,y+depthY]],'#e3e7d9','#b8c2aa');
-        line({x,y},{x:x+w,y},'#f5f5ed',2);
+        polygon([[x,y],[x+w,y],[x+w,y+h],[x,y+h]],color,scene.stroke);
+        polygon([[x,y],[x+w,y],[x+w+depthX,y+depthY],[x+depthX,y+depthY]],scene.even,scene.treadStroke);
+        line({x,y},{x:x+w,y},scene.edge,2);
       };
-      block(40,205,180,stair.floor-205+71,'#b6beaa');
-      const w=stair.wall;block(w.x,w.y,w.width,w.height,'#acb79d');
+      block(40,205,180,stair.floor-205+71,scene.side);
+      const w=stair.wall;block(w.x,w.y,w.width,w.height,scene.riser);
       stair.ledges.forEach((t,i)=>{
-        block(t.x,t.y,t.width,t.height,'#b6beaa');
-        ctx.fillStyle='#718260';ctx.font='10px monospace';ctx.fillText('LEDGE '+(i+1),t.x+8,t.y+14);
+        block(t.x,t.y,t.width,t.height,scene.side);
+        ctx.fillStyle=scene.ledgeInk;ctx.font='10px monospace';ctx.fillText('LEDGE '+(i+1),t.x+8,t.y+14);
       });
-      block(stair.start,stair.floor,stair.end+208-stair.start,71,'#b6beaa');
+      block(stair.start,stair.floor,stair.end+208-stair.start,71,scene.side);
     } else {
       // Staircase side silhouette, with separate tread and riser faces.
       const first=stair.treads[0],clipped=endless&&first.index>0;
@@ -162,46 +164,46 @@
       for(const t of stair.treads)side.push([t.x,t.y],[t.x+t.width,t.y]);
       if(endless)side.push([stair.end,stair.floor],[clipped?first.x:40,stair.floor]);
       else side.push([stair.end,stair.floor],[stair.end+118,stair.floor],[stair.end+118,stair.floor+71],[40,stair.floor+71]);
-      polygon(side,atmosphere?.side||'#b6beaa',atmosphere?.stroke||'#a5b098');
-      polygon([[40,205],[220,205],[220+depthX,205+depthY],[40+depthX,205+depthY]],'#eff0e6','#bdc6b0');
+      polygon(side,atmosphere?.side||scene.side,atmosphere?.stroke||scene.outline);
+      polygon([[40,205],[220,205],[220+depthX,205+depthY],[40+depthX,205+depthY]],scene.platform,scene.platformStroke);
       stair.treads.forEach(t=>{
         const {x,y,width:w,rise}=t;
         // World-indexed colors stay fixed while the camera or replay moves past a step.
-        const tint=endless?endlessFx.palette(t.index+1):null;
-        polygon([[x,y-rise],[x+depthX,y-rise+depthY],[x+depthX,y+depthY],[x,y]],tint?.riser||'#acb79d',tint?.stroke||'#a2af93');
-        polygon([[x,y],[x+w,y],[x+w+depthX,y+depthY],[x+depthX,y+depthY]],t.index%2?(tint?.odd||'#d9dece'):(tint?.even||'#e3e7d9'),tint?.stroke||'#b8c2aa');
-        line({x,y},{x:x+w,y},'#f5f5ed',2);
-        ctx.fillStyle=tint?.ink||'#8b997b';ctx.font='10px monospace';ctx.fillText(String(t.index+1).padStart(2,'0'),x+16,y+21);
+        const tint=endless?endlessFx.palette(t.index+1,night):null;
+        polygon([[x,y-rise],[x+depthX,y-rise+depthY],[x+depthX,y+depthY],[x,y]],tint?.riser||scene.riser,tint?.stroke||scene.stroke);
+        polygon([[x,y],[x+w,y],[x+w+depthX,y+depthY],[x+depthX,y+depthY]],t.index%2?(tint?.odd||scene.odd):(tint?.even||scene.even),tint?.stroke||scene.treadStroke);
+        line({x,y},{x:x+w,y},scene.edge,2);
+        ctx.fillStyle=tint?.ink||scene.ink;ctx.font='10px monospace';ctx.fillText(String(t.index+1).padStart(2,'0'),x+16,y+21);
       });
       if(endless)for(const t of stair.treads) {
         if((t.index+1)%endlessFx.INTERVAL)continue;
-        const tint=endlessFx.palette(t.index+1);
+        const tint=endlessFx.palette(t.index+1,night);
         line({x:t.x,y:t.y},{x:t.x+t.width,y:t.y},tint.accent,4);
-        ctx.fillStyle='#f7f6f1';ctx.fillRect(t.x+5,t.y+9,134,29);
+        ctx.fillStyle=scene.panel;ctx.fillRect(t.x+5,t.y+9,134,29);
         ctx.fillStyle=tint.accent;ctx.font='bold 15px monospace';ctx.fillText((t.index+1)+' STEPS ↓',t.x+12,t.y+29);
       }
-      if(!endless)polygon([[stair.end,stair.floor],[stair.end+208,stair.floor],[stair.end+208+depthX,stair.floor+depthY],[stair.end+depthX,stair.floor+depthY]],'#d4dbc7','#b8c2aa');
+      if(!endless)polygon([[stair.end,stair.floor],[stair.end+208,stair.floor],[stair.end+208+depthX,stair.floor+depthY],[stair.end+depthX,stair.floor+depthY]],scene.floor,scene.floorStroke);
       if(stair.drop) {
         const y=stair.treads[stair.treads.length-1].y,x=stair.end;
-        polygon([[x,y],[x+depthX,y+depthY],[x+depthX,stair.floor+depthY],[x,stair.floor]],'#acb79d','#a2af93');
-        ctx.fillStyle='#a16243';ctx.font='12px monospace';ctx.fillText('FINAL DROP ↓',x-120,y+25);
+        polygon([[x,y],[x+depthX,y+depthY],[x+depthX,stair.floor+depthY],[x,stair.floor]],scene.riser,scene.stroke);
+        ctx.fillStyle=scene.label;ctx.font='12px monospace';ctx.fillText('FINAL DROP ↓',x-120,y+25);
       }
     }
     // Warning stripe on the starting ledge.
-    for(let x=65;x<205;x+=18)polygon([[x,205],[x+9,205],[x+9,213],[x,213]],'#8e9a7d');
-    ctx.fillStyle='#8b967e';ctx.font='12px monospace';ctx.fillText('START /',64,245);
+    for(let x=65;x<205;x+=18)polygon([[x,205],[x+9,205],[x+9,213],[x,213]],scene.stripe);
+    ctx.fillStyle=scene.startInk;ctx.font='12px monospace';ctx.fillText('START /',64,245);
     if(ghostEnabled&&ghostFrames&&(mode==='running'||mode==='ready'||mode==='charging'||mode==='aiming')) {
       const ghost=ghostFrames.at(Math.min(Math.round(current.time/DT),ghostFrames.length-1));
       ctx.save();ctx.globalAlpha=.22;
       for(const part of ghost.segments) {
-        if(part.name==='head')circle(part.ax,part.ay,part.radius,'#48788b');
-        else line({x:part.ax,y:part.ay},{x:part.bx,y:part.by},'#48788b',part.radius*2);
+        if(part.name==='head')circle(part.ax,part.ay,part.radius,scene.ghost);
+        else line({x:part.ax,y:part.ay},{x:part.bx,y:part.by},scene.ghost,part.radius*2);
       }
       ctx.restore();
     }
     const characterId=current.character||'human';
     const pts=current.points;
-    window.DismountShadow.draw(ctx,stair,pts[2],depthX,depthY);
+    window.DismountShadow.draw(ctx,stair,pts[2],depthX,depthY,night);
     // Clothing and tapered silhouettes follow each rigid body's endpoints.
     // Render directly from the skeleton so proportions and collision shapes agree.
     const drawOrder = ['neckLink','leftUpperArm','leftForearm','leftHand','leftThigh','leftShin','leftFoot',
@@ -297,16 +299,16 @@
       const start={x:p.x-arrowLength*Math.cos(angle),y:p.y+arrowLength*Math.sin(angle)},end={x:p.x-28*Math.cos(angle),y:p.y+28*Math.sin(angle)};
       line(start,end,arrowColor,3);
       polygon([[end.x,end.y],[end.x-13*Math.cos(angle-.45),end.y+13*Math.sin(angle-.45)],[end.x-13*Math.cos(angle+.45),end.y+13*Math.sin(angle+.45)]],arrowColor);
-      ctx.fillStyle='#a16243';ctx.font='11px monospace';ctx.fillText(CHARACTERS[current.character||'human'].name.toUpperCase()+' / 01',Math.max(30,p.x-70),35);
+      ctx.fillStyle=scene.label;ctx.font='11px monospace';ctx.fillText(CHARACTERS[current.character||'human'].name.toUpperCase()+' / 01',Math.max(30,p.x-70),35);
     }
     for(const p of particles){
-      const color=p.kind==='joint'?'#b72f29':p.edge?'#d9562e':'#527b42';
+      const color=night?(p.kind==='joint'?'#ff7765':p.edge?'#ffac86':'#b8e1a4'):(p.kind==='joint'?'#b72f29':p.edge?'#d9562e':'#527b42');
       ctx.globalAlpha=Math.max(0,p.life);ctx.strokeStyle=color;ctx.lineWidth=2;
       if(injuryRings) { ctx.beginPath();ctx.arc(p.x,p.y,6+(1-p.life)*10,0,Math.PI*2);ctx.stroke(); }
       ctx.fillStyle=color;ctx.font='bold 12px monospace';
       if(injuryLabels) ctx.fillText(p.label,p.x+10,p.y-10-(1-p.life)*24);
     }
-    if(showPhysics)physicsView.draw(ctx,current.physics,scale);
+    if(showPhysics)physicsView.draw(ctx,current.physics,scale,night);
     ctx.globalAlpha=1;ctx.restore();
   }
   const damagePoints=()=>groups.reduce((sum,group)=>sum+current.damage[group],0);
@@ -332,7 +334,7 @@
   function updateInjuryMap() {
     for(const segment of current.segments) {
       const node=$('map-'+segment.name), intensity=Math.min(1,segment.damage/3000);
-      const color=segment.damage ? `hsl(${Math.round(42-42*intensity)} 75% ${Math.round(65-23*intensity)}%)` : '#cbd2c1';
+      const color=segment.damage ? `hsl(${Math.round(42-42*intensity)} 75% ${Math.round(65-23*intensity)}%)` : appearance.scene.intact;
       reportAttr('map-'+segment.name,'stroke',color);
       reportAttr('map-'+segment.name,'fill',color);
       const text=partLabels[segment.name]+': '+segment.damage.toLocaleString()+' points, '+segment.hits+' hits';
@@ -340,8 +342,8 @@
     }
     for(const joint of current.joints) {
       const node=$('map-joint-'+joint.name);
-      reportAttr('map-joint-'+joint.name,'fill',joint.broken?'#b72f29':joint.damage>0?'#e8a23e':'#f7f6f1');
-      reportAttr('map-joint-'+joint.name,'stroke',joint.broken?'#6e1714':'#66715c');
+      reportAttr('map-joint-'+joint.name,'fill',joint.broken?appearance.scene.broken:joint.damage>0?'#e8a23e':appearance.scene.joint);
+      reportAttr('map-joint-'+joint.name,'stroke',joint.broken&&!appearance.dark?'#6e1714':appearance.scene.jointStroke);
       reportAttr('map-joint-'+joint.name,'r',joint.broken?'4':'2.5');
       $('map-joint-title-'+joint.name).textContent=joint.name.replace(/([A-Z])/g,' $1')+': '+(joint.broken?theme().broken:joint.damage>0?theme().strained:'intact');
     }
@@ -413,6 +415,8 @@
   $('physics-view').addEventListener('click',()=>{
     showPhysics=!showPhysics;updatePhysicsToggle();lastDraw=-Infinity;
   });
+  appearance.bind($('theme-toggle'));
+  appearance.subscribe(()=>{backgroundGradient=null;lastDraw=-Infinity;updateReport();});
   function updateMotionToggle() {
     $('motion').disabled=layout==='endless';
     $('motion').setAttribute('aria-pressed',String(motionEnabled()));

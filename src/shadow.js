@@ -36,7 +36,7 @@
     }
     return patches;
   }
-  function draw(ctx,stair,center,depthX=0,depthY=0) {
+  function draw(ctx,stair,center,depthX=0,depthY=0,dark=false) {
     const y=depthY?-RADIUS_Y:0;
     for(const patch of project(stair,center)) {
       ctx.save();
@@ -44,8 +44,9 @@
       ctx.beginPath();ctx.rect(patch.left,y-RADIUS_Y,patch.right-patch.left,RADIUS_Y*2);ctx.clip();
       ctx.translate(patch.x,y);ctx.scale(RADIUS_X,RADIUS_Y);
       const gradient=ctx.createRadialGradient(0,0,0,0,0,1);
-      gradient.addColorStop(0,'#3f5032');gradient.addColorStop(.55,'#3f50328c');gradient.addColorStop(1,'#3f503200');
-      ctx.globalAlpha=patch.alpha;ctx.fillStyle=gradient;
+      const color=dark?'#000000':'#3f5032';
+      gradient.addColorStop(0,color);gradient.addColorStop(.55,color+'8c');gradient.addColorStop(1,color+'00');
+      ctx.globalAlpha=patch.alpha*(dark?1.5:1);ctx.fillStyle=gradient;
       ctx.beginPath();ctx.arc(0,0,1,0,Math.PI*2);ctx.fill();ctx.restore();
     }
   }

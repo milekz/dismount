@@ -1,0 +1,50 @@
+/* Dark surfaces and readable controls; character and damage colors stay recognizable. */
+html[data-theme="dark"] {
+  color:#e0e6dd; background:#131a1f; color-scheme:dark;
+  --orange:#ff9b70; --muted:#aebbb2; --line:#405059;
+}
+html[data-theme="dark"] :is(.controls,.report,.highscores,.sidebar-report,.run-stats,.replay-controls,.physics-legend,.settings-drawer,.welcome-dialog) {
+  background:#1d272d; color:#e0e6dd; border-color:var(--line);
+}
+html[data-theme="dark"] #game-panel:is(:fullscreen,:-webkit-full-screen,[data-expanded="true"]) { background:#131a1f; }
+html[data-theme="dark"] .arena { background:#171e22; border-color:var(--line); }
+html[data-theme="dark"] .arena-bottom { background:#182228ed; border-color:var(--line); }
+html[data-theme="dark"] .brand-icon { color:#192219; background:#d6e1ce; }
+html[data-theme="dark"] :is(.edition,.eyebrow,.intro-note,.help,.number,.range-labels,.keyboard-hint,footer,.section-title>span,.arena-top,.scoreboard p,.scoreboard>span,.scene-label,.arena-bottom,.score-table th,.damage-row,.report-footer,.map-legend,.body-inspector p,.run-stats dt,.extra-settings summary,.sidebar-report summary,.physics-legend>small,.welcome-chamber-description) { color:#b0bcb3; }
+html[data-theme="dark"] :is(.scoreboard b,.damage-row b,.report-footer b,.run-stats dd,#fps,.endless-progress) { color:#dae7d3; }
+html[data-theme="dark"] :is(.small-button,.secondary-actions button,.score-table button,.replay-buttons button,.retry-settings button) {
+  color:#d6e2ce; border-color:#53666c; background:#26333a;
+}
+html[data-theme="dark"] #stage-reset { color:#d6e2ce; background:#26333a; border-color:#53666c; }
+html[data-theme="dark"] button[aria-pressed="true"] { color:#e2f5d9; background:#34483f; border-color:#7a9579; }
+html[data-theme="dark"] :is(select,#initials) { color:#e0e6dd; background:#26333a; border-color:#53666c; }
+html[data-theme="dark"] option { background:#26333a; color:#e0e6dd; }
+html[data-theme="dark"] #initials::placeholder { color:#aebbb2; }
+html[data-theme="dark"] :is(.power-track,.damage-row>div) { background:#344249; }
+html[data-theme="dark"] .power-track i { background:#1d272d; }
+html[data-theme="dark"] kbd { color:#c8d5c2; border-color:#53666c; }
+html[data-theme="dark"] :is(.score-table th,.score-table td,.report-footer,#score-entry) { border-color:var(--line); }
+html[data-theme="dark"] .score-table td:nth-child(2) { color:var(--orange); }
+html[data-theme="dark"] .result { color:#e0e6dd; background:#1d272df5; border-color:#60716b; box-shadow:0 10px 60px #0005; }
+html[data-theme="dark"] :is(.result>p,.result>#result-quip,.result>#result-score-breakdown) { color:#c2d0bb; }
+html[data-theme="dark"] .result button { color:#e2f5d9; background:#34483f; }
+html[data-theme="dark"] :is(.launch,.initials-row button) { color:#2c1c15; background:var(--orange); }
+html[data-theme="dark"] .launch:hover:not(:disabled) { background:#ffb18f; }
+html[data-theme="dark"] :is(.injury-list,#strongest-hit) { color:#ffac86; }
+html[data-theme="dark"] .injury-map [aria-pressed="true"],html[data-theme="dark"] .injury-map [role="button"]:focus-visible { filter:drop-shadow(0 0 2px #d6e7cb); }
+html[data-theme="dark"] #body-map-details { stroke:#253d32; opacity:.9; }
+html[data-theme="dark"] .recovery-rating meter::-webkit-meter-bar { background:#344249; }
+html[data-theme="dark"] .impact-notice { background:#202b31ee; color:#ffbd9a; border-color:#ff9b70; }
+html[data-theme="dark"] .challenge-status { background:#202b31ee; color:#d6e2ce; border-color:#a1b58b; }
+html[data-theme="dark"] .challenge-status[data-complete="true"] { color:#b8e1a4; border-color:#92bc78; }
+html[data-theme="dark"] .endless-milestone { color:#d6e2ce; background:#202b31f2; border-color:#596b60; border-left-color:#e2b376; }
+html[data-theme="dark"] .physics-legend>span:first-child { color:#87d7b3; }
+html[data-theme="dark"] .physics-legend>span:nth-child(2) { color:#8bc7ff; }
+html[data-theme="dark"] .physics-legend>span:nth-child(3) { color:#ffac86; }
+html[data-theme="dark"] .welcome-dialog::backdrop { background:#0009; }
+html[data-theme="dark"] .welcome-dialog[data-closing="true"] { background:transparent; border-color:transparent; box-shadow:none; }
+html[data-theme="dark"] .welcome-dialog[data-closing="true"]::backdrop { animation-name:welcome-blur-out-night; }
+@keyframes welcome-blur-out-night {
+  from { backdrop-filter:blur(3px); background:#0009; }
+  to { backdrop-filter:blur(0); background:#0000; }
+}
