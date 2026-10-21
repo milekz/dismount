@@ -26,7 +26,7 @@ function setup(AudioContext, storage, reducedMotion=true, viewport={width:900,he
       },
       children: [], appendChild(child) { this.children.push(child); }, replaceChildren(...children) { this.children=children; }, getAttribute(name) { return this[name]; }, setAttribute(name, value) { this[name] = value; },
       getBoundingClientRect() { return { ...viewport, left: 0, top: 0 }; },
-      getContext() { return context2d; },scrollIntoView(options){scrollRequests.push({id,options});}
+      getContext() { return context2d; },toDataURL(){return 'data:image/png;base64,test';},scrollIntoView(options){scrollRequests.push({id,options});}
     });
     return elements.get(id);
   }
@@ -50,6 +50,7 @@ function setup(AudioContext, storage, reducedMotion=true, viewport={width:900,he
     sandbox.window.history={state:null,replaceState(state,title,href){sandbox.window.location.href=href;}};
   }
   sandbox.window.DismountShadow=require('../src/shadow.js');
+  sandbox.window.DismountBadges=require('../src/badges.js');
   sandbox.window.DismountPhysicsView=require('../src/physics-view.js');
   const theme=require('../src/theme.js');
   const themeHost={matchMedia:()=>({matches:false}),addEventListener(){}};
@@ -672,6 +673,66 @@ test('mouse and touch aiming cover minus 100 through 100 degrees in quarter-degr
     assert.equal(game.element('status').textContent,'DISMOUNT IN PROGRESS');
     assert.equal(game.element('power-value').textContent,'100%');
   }
+});
+
+test('shared badge URLs reconstruct exact current and historical runs without adding local records',()=>{
+  const badges=require('../src/badges.js');
+  for(const engine of [physics.REPLAY_VERSION,'rigid-3.0.0']) {
+    const simulation=new physics.Simulation('classic','robot',engine),push={part:'chest',angle:6.25,power:.734567891234};
+    simulation.push(push.part,push.angle,push.power);let steps=0;
+    while(simulation.active&&steps<2165){simulation.step();steps++;}
+    const end=simulation.snapshot(),entry={id:'share-test',savedAt:0,nick:'QRX',layout:'classic',character:'robot',engine,push,steps,score:end.score,hits:end.hits,time:end.time};
+    const writes=[],storage={getItem:()=>null,setItem:(key,value)=>writes.push([key,value])};
+    const game=setup(undefined,storage,true,undefined,badges.link(entry));
+    assert.equal(game.element('status').textContent,'PREPARING REPLAY');
+    assert.equal(game.element('character').value,'robot');
+    assert.equal(game.element('angle-value').textContent,'6.25°');
+    game.advance(24);
+    assert.equal(game.element('result-title').textContent,'Replay · QRX');
+    assert.equal(Number(game.element('score').textContent),entry.score);
+    assert.equal(game.element('score-entry').hidden,true);assert.deepEqual(writes,[]);
+    assert.equal(game.element('run-badge').disabled,false);
+    game.click('retry-edit');assert.equal(game.element('angle').value,'6.25');
+    game.click('preset-launch');assert.equal(new URL(game.url()).hash,'');
+    assert.equal(game.element('run-badge').disabled,true);
+  }
+});
+
+test('shared links reject malformed recipes and mismatched results without awarding records',()=>{
+  const badges=require('../src/badges.js');
+  const invalid=setup(undefined,undefined,true,undefined,'https://example.com/?chamber=classic#replay=2~bad');
+  assert.equal(invalid.element('status').textContent,'READY TO DISMOUNT');
+  assert.match(invalid.element('board-message').textContent,/not supported/);
+  const entry={id:'bad-score',savedAt:0,nick:'BAD',layout:'classic',character:'human',engine:physics.REPLAY_VERSION,
+    push:{part:'chest',angle:.25,power:0},steps:1,score:999999,hits:0,time:physics.DT};
+  const writes=[],storage={getItem:()=>null,setItem:(...args)=>writes.push(args)};
+  const game=setup(undefined,storage,true,undefined,badges.link(entry));game.advance(.1);
+  assert.equal(game.element('status').textContent,'READY TO DISMOUNT');
+  assert.match(game.element('board-message').textContent,/cannot be reproduced/);
+  assert.equal(game.element('run-badge').disabled,true);assert.deepEqual(writes,[]);
+});
+
+test('completed and saved runs show clickable badges next to replay, with a download fallback',async()=>{
+  const values=new Map(),storage={getItem:k=>values.get(k)||null,setItem:(k,v)=>values.set(k,v)};
+  const game=setup(undefined,storage);game.click('drop');game.advance(20);
+  const badge=game.element('run-badge');assert.equal(badge.disabled,false);
+  assert.equal(badge.children[0].src,'data:image/png;base64,test');
+  let opened=0;game.element('badge-dialog').showModal=()=>opened++;
+  await game.click('run-badge');
+  assert.equal(opened,1);assert.match(game.element('badge-status').textContent,/Download the PNG/);
+  const badges=require('../src/badges.js'),before=badges.readLink(game.element('badge-link').value).entry;
+  assert.equal(before.nick,'RUN');assert.equal(before.push.power,0);
+  assert.equal(game.element('badge-download').download,'dismount-RUN-'+before.score+'.png');
+  game.element('initials').value='NEW';game.element('score-entry').events.submit({preventDefault(){}});
+  const row=game.element('score-rows').children[0],savedBadge=row.children[3].children[1];
+  assert.ok(savedBadge.getAttribute('data-badge-id'));
+  game.click('replay');await game.click('run-badge');
+  assert.equal(badges.readLink(game.element('badge-link').value).entry.nick,'NEW');
+  game.click('reset');
+  game.element('score-rows').events.click({target:{closest:()=>savedBadge}});await Promise.resolve();
+  assert.equal(badges.readLink(game.element('badge-link').value).entry.nick,'NEW');
+  game.click('reset');assert.equal(badge.disabled,false);
+  game.element('layout').value='shaft';game.element('layout').events.change();assert.equal(badge.disabled,true);
 });
 
 test('additional chambers have separate boards and saved replays after reload',()=>{

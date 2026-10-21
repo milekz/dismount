@@ -266,6 +266,18 @@ button { touch-action:manipulation; }
 #settings-close { flex-shrink:0; }
 #drawer-body { display:flex; flex:1; min-height:0; }
 #drawer-body>#push-controls { width:100%; margin-top:8px; }
+#control-home>.secondary-actions .run-badge,.score-table .run-badge { padding:3px; overflow:hidden; line-height:0; }
+.run-badge img { display:block; width:100%; max-width:160px; height:auto; margin:auto; border-radius:2px; }
+.score-table .run-badge { width:112px; margin-left:8px; vertical-align:middle; }
+.badge-dialog { width:min(650px,calc(100% - 24px)); max-height:calc(100dvh - 24px); overflow:auto; padding:20px; border:1px solid var(--line); border-radius:8px; background:#f7f6f1; color:inherit; }
+.badge-dialog::backdrop { background:#101915a8; }
+#badge-preview-copy { display:block; width:100%; padding:0; margin:16px 0; background:transparent; border:0; }
+#badge-preview { display:block; width:100%; height:auto; border-radius:5px; }
+#badge-status { min-height:2.8em; font-size:13px; line-height:1.4; }
+.badge-actions { display:flex; flex-wrap:wrap; gap:8px; margin:12px 0 18px; }
+.badge-actions .small-button { display:inline-flex; align-items:center; min-height:44px; text-decoration:none; }
+#badge-link { width:100%; padding:10px; border:1px solid var(--line); border-radius:3px; background:transparent; color:inherit; font:12px monospace; }
+@media(max-width:730px) { .score-table .run-badge { display:block; width:96px; margin:6px 0 0; } }
 @media(max-width:730px) {
   .workspace>#control-home { height:570px; grid-row:2; }
   #control-home>.secondary-actions button { min-height:44px; }

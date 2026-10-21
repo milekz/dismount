@@ -6,6 +6,7 @@
   const physicsView=window.DismountPhysicsView;
   const appearance=window.DismountTheme.current;
   const {ScoreBoard, normalizeNick} = window.DismountScores;
+  const badgeTools=window.DismountBadges,sharedLink=badgeTools.readLink(window.location?.href);
   let storage;
   try { storage = localStorage; } catch (_) {}
   const endlessFx=window.DismountEndless,depthRecords=endlessFx.createRecords(storage);
@@ -20,6 +21,7 @@
       : requested;
     if(Object.hasOwn(LAYOUTS,selected))linkedChamber=selected;
   } catch (_) { /* Keep the default when URL access is unavailable. */ }
+  if(sharedLink.entry){linkedChamber=sharedLink.entry.layout;linkedCharacter=sharedLink.entry.character;}
   let layout=linkedChamber||'endless', character=linkedCharacter||'human';
   const selectionKey=()=>layout+':'+character;
   let board=new ScoreBoard(storage,REPLAY_VERSION,layout,character);
@@ -39,6 +41,10 @@
   let runPush = null, pendingScore = null, playbackFrames = new Recording(), replayJob = null, replayLabel = '';
   const dom=new Map();
   const $ = id => {if(!dom.has(id))dom.set(id,document.getElementById(id));return dom.get(id);};
+  const badgeView=badgeTools.createView({host:window,document});let badgeEntry=null;
+  function setBadgeEntry(entry) {badgeEntry=entry;badgeView.decorate($('run-badge'),entry);}
+  setBadgeEntry(null);
+  $('run-badge').addEventListener('click',()=>{if(badgeEntry)badgeView.show(badgeEntry);});
   const chambers=Object.fromEntries(Object.keys(LAYOUTS).map(id=>[id,buildStair(id)]));
   let replayPaused=false,replaySpeed=1,peakFrame=0,retryRecipe=null,presetPower=0,reportClock=0;
   let noticeLife=0,milestoneLife=0;
@@ -481,6 +487,7 @@
   function updateChamberUrl() {
     try {
       const url=new URL(window.location.href);
+      if(url.hash.startsWith('#replay='))url.hash='';
       url.searchParams.set('chamber',layout);
       if(character==='human')url.searchParams.delete('character');
       else url.searchParams.set('character',character);
@@ -491,7 +498,7 @@
     if(!['ready','finished'].includes(mode)||!Object.hasOwn(LAYOUTS,$('layout').value)||!Object.hasOwn(CHARACTERS,$('character').value)) {
       $('layout').value=layout;$('character').value=character;return;
     }
-    bests.set(selectionKey(),best);layout=$('layout').value;character=$('character').value;
+    bests.set(selectionKey(),best);layout=$('layout').value;character=$('character').value;setBadgeEntry(null);
     updateChamberNumber();updateChamberUrl();sim=new Simulation(layout,character);frames=new Recording();ghostFrames=null;attemptCompleted=false;updateGhost();retryRecipe=null;
     const key=selectionKey();
     if(!boards.has(key))boards.set(key,new ScoreBoard(storage,REPLAY_VERSION,layout,character));
@@ -612,6 +619,7 @@
     $('power-value').textContent=Math.round(power*100)+'%';
     $('power-fill').style.width=power*100+'%';
     runPush=preset?{part:preset.part,angle:preset.angle,power:preset.power}:{part:$('part').value,angle:Number($('angle').value),power};
+    setBadgeEntry(null);updateChamberUrl();
     if(attemptCompleted&&frames.length){ghostFrames=frames;attemptCompleted=false;updateGhost();}
     $('settings-drawer').hidden=true;$('settings-toggle').setAttribute('aria-expanded','false');
     pendingScore=null;mode='running';lock(true);frames=new Recording();frames.push(physicsView.snapshot(sim));sim.push(runPush.part,runPush.angle,runPush.power);accumulator=0;
@@ -708,6 +716,7 @@
     else {replayPaused=true;updateReplayControls();}
     mode='finished';lock(true);$('launch').disabled=false;$('launch').innerHTML='New experiment <span>↗</span>';$('status').textContent='EXPERIMENT COMPLETE';$('replay').disabled=!frames.length;
     pendingScore=replaying?null:{push:{...runPush},score:current.score,hits:current.hits,time:current.time,steps:frames.length-1};
+    if(!replaying)setBadgeEntry({...pendingScore,id:'last-run',nick:'RUN',savedAt:0,layout,character,engine:REPLAY_VERSION});
     $('score-entry').hidden=replaying||!board.qualifies(current.score);
     $('save-message').textContent='';
     const record=!replaying&&current.score>best;
@@ -738,7 +747,12 @@
         button.disabled=!['ready','finished'].includes(mode)||!supportsReplay(entry);
         button.setAttribute('aria-label','Replay '+entry.nick+' — '+entry.score+' points');
         if(!supportsReplay(entry))button.title='Recorded with a different physics version.';
-        cell.appendChild(button);row.appendChild(cell);target.appendChild(row);
+        cell.appendChild(button);
+        if(supportsReplay(entry)) {
+          const badge=document.createElement('button');badgeView.decorate(badge,entry);
+          badge.setAttribute('data-badge-id',entry.id);cell.appendChild(badge);
+        }
+        row.appendChild(cell);target.appendChild(row);
       });
     };
     rows(board.entries,$('score-rows'));rows(board.previousEntries,$('previous-score-rows'));
@@ -752,6 +766,14 @@
   }
   function startReplay(recording, label='', recipe=runPush,engine=REPLAY_VERSION) {
     clearMilestone();
+    if(recipe) {
+      const end=recording.at(-1);
+      const sameBadge=badgeEntry&&badgeEntry.layout===layout&&badgeEntry.character===character&&badgeEntry.engine===engine
+        &&badgeEntry.score===end.score&&badgeEntry.steps===recording.length-1
+        &&['part','angle','power'].every(key=>badgeEntry.push[key]===recipe[key]);
+      setBadgeEntry({id:'replayed-run',savedAt:0,nick:/^[A-Z]{3}$/.test(label)?label:sameBadge?badgeEntry.nick:'RUN',layout,character,engine,
+        push:{...recipe},score:end.score,hits:end.hits,time:end.time,steps:recording.length-1});
+    }
     revealStage();
     unlockAudio();noticeLife=0;$('impact-notice').hidden=true;replayPaused=false;peakFrame=0;let peakPoints=-1;
     peakFrame=recording.peakIndex;peakPoints=recording.peakPoints;
@@ -868,9 +890,18 @@
     }
   }
   function replayScore(event) {
-    const button=event.target.closest('button[data-score-id]');
-    if(!button||!['ready','finished'].includes(mode))return;
-    const entry=board.get(button.getAttribute('data-score-id'));
+    const button=event.target.closest('button[data-score-id],button[data-badge-id]');
+    if(!button)return;
+    const scoreId=button.getAttribute('data-score-id');
+    if(!scoreId) {
+      const entry=board.get(button.getAttribute('data-badge-id'));
+      if(entry&&supportsReplay(entry))badgeView.show(entry);return;
+    }
+    if(!['ready','finished'].includes(mode))return;
+    const entry=board.get(scoreId);
+    loadReplay(entry);
+  }
+  function loadReplay(entry) {
     if(!entry||!supportsReplay(entry))return;
     revealStage();unlockAudio();
     if(replayCache?.key===replayKey(entry)){startReplay(replayCache.frames,entry.nick,entry.push,entry.engine);return;}
@@ -913,6 +944,7 @@
     const nick=normalizeNick($('initials').value);$('initials').value=nick;
     const result=board.save(nick,pendingScore);
     if(!result.ok){$('save-message').textContent=result.message;return;}
+    setBadgeEntry(result.entry);
     pendingScore=null;$('score-entry').hidden=true;renderBoard();
     $('save-message').textContent=result.persistent?'Saved as '+nick+'.':'Saved for this session only; browser storage is unavailable.';
   });
@@ -1109,5 +1141,13 @@
   // Losing capture is not a cancellation: retain the gesture until global release.
   // Only pointercancel, reset, or leaving the window cancels an unfinished gesture.
   window.addEventListener('blur', () => { if (drag || launchPress) reset(); });
-  reset();resize();if(!linkedChamber&&!linkedCharacter)$('welcome').showModal?.();requestAnimationFrame(tick);
+  reset();resize();
+  if(sharedLink.entry) {
+    $('part').value=sharedLink.entry.push.part;$('angle').value=String(sharedLink.entry.push.angle);
+    $('angle-value').textContent=sharedLink.entry.push.angle+'°';loadReplay(sharedLink.entry);
+  } else {
+    if(sharedLink.error)$('board-message').textContent=sharedLink.error;
+    if(!linkedChamber&&!linkedCharacter)$('welcome').showModal?.();
+  }
+  requestAnimationFrame(tick);
 })();

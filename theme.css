@@ -3,7 +3,7 @@ html[data-theme="dark"] {
   color:#e0e6dd; background:#131a1f; color-scheme:dark;
   --orange:#ff9b70; --muted:#aebbb2; --line:#405059;
 }
-html[data-theme="dark"] :is(.controls,.report,.highscores,.sidebar-report,.run-stats,.replay-controls,.physics-legend,.settings-drawer,.welcome-dialog) {
+html[data-theme="dark"] :is(.controls,.report,.highscores,.sidebar-report,.run-stats,.replay-controls,.physics-legend,.settings-drawer,.welcome-dialog,.badge-dialog) {
   background:#1d272d; color:#e0e6dd; border-color:var(--line);
 }
 html[data-theme="dark"] #game-panel:is(:fullscreen,:-webkit-full-screen,[data-expanded="true"]) { background:#131a1f; }

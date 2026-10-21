@@ -66,6 +66,16 @@ Each chamber/character combination has its own local leaderboard and personal be
 
 ## High scores and saved replays
 
+### Replay badges
+
+After a completed attempt, a badge appears beside **Replay**. Saved scores also have badges beside their replay buttons. Click a badge to copy a **960 × 480 PNG** with a score-based title, initials, chamber, subject, push settings and QR code. A small staircase emblem sits inside the QR, with high error correction and a clear outer margin. The preview offers **Copy badge**, **Copy replay link** and **Download PNG**. Unsaved attempts use `RUN` as initials; saving the score updates the badge.
+
+The QR opens the game and reconstructs the same attempt automatically, without needing the sender's local scores. Its versioned URL includes the chamber, character, body part, exact angle/power, physics version, tick count and expected result. Displayed power is rounded only on the artwork; the link preserves the full value. Shared runs are checked against the expected result and never added to personal records or rankings automatically. Unsupported or malformed links show an error. Starting another push or changing chambers removes the replay fragment.
+
+Badges and QR codes are generated locally; no image upload, external QR API or account is required. Image copying uses the [Clipboard API](https://webkit.org/blog/10855/async-clipboard-api/) directly from a click, including Safari's user-gesture requirement. If copying is unavailable or denied, download the PNG or copy the link manually. HTTP(S) links retain the current deployment's address; a local `file://` page uses `https://milekz.github.io/dismount/` for sharing.
+
+### Local leaderboard
+
 Total score combines **damage + progress**. Each newly passed stair earns 10 progress points (each ledge in The Shaft), capped at 20% of damage points, rounded down. For example, 15 steps and 1,000 damage points give 1,150 total points; 50 steps with the same damage give 1,200. Progress uses the furthest center-of-mass step count, so skipped stairs count, revisiting stairs adds nothing, and raw distance earns no points. Without damage, the bonus is zero. The stage and result panel show both parts; progress does not change injuries or recovery meters.
 
 After a qualifying fall, enter exactly three letters (A–Z) and select **Save score**. Each chamber/character board retains its ten highest scores, with a **Replay** button for each entry. Lowercase initials become uppercase. Replaying never submits another score.
@@ -99,6 +109,7 @@ The view works during play, fullscreen, paused replay and timeline seeking, incl
 - `index.html`: accessible native controls and page structure.
 - `style.css`: responsive layout and visual styling.
 - `theme.css` and `src/theme.js`: dark appearance, system preference tracking and saved overrides; initialized before the stylesheet to avoid a light flash.
+- `src/badges.js`: versioned replay URLs, PNG badges and clipboard/download controls; uses the vendored QR generator.
 - `src/physics.js`: rigid-body ragdoll, collision scoring, joint damage, and snapshot adapter.
 - `src/physics-view.js`: read-only COM, velocity and contact-force telemetry, plus its optional overlay.
 - `src/character-art.js`: procedural Canvas artwork for the four alternative subjects.
