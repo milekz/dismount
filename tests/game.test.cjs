@@ -655,13 +655,19 @@ test('feet and neck can be selected on the dummy and their runs save and replay'
   }
 });
 
-test('mouse aiming covers minus 100 through 100 degrees',()=>{
-  for(const [dx,dy,expected] of [[-60,-220,'100'],[-60,220,'-100'],[200,200,'-45']]) {
+test('mouse and touch aiming cover minus 100 through 100 degrees in quarter-degree steps',()=>{
+  for(const [dx,dy,expected,pointerType='mouse'] of [
+    [-60,-220,'100'],[-60,220,'-100'],[200,200,'-45'],
+    [200,-200*Math.tan(6.18*Math.PI/180),'6.25'],
+    [200,200*Math.tan(6.63*Math.PI/180),'-6.75','touch'],
+    [200,-200*Math.tan(.49*Math.PI/180),'0.5','touch']
+  ]) {
     const game=setup();game.advance(.1);
-    const canvas=game.element('game'),down={button:0,pointerId:92,clientX:500,clientY:400,preventDefault(){}};
+    const canvas=game.element('game'),down={button:0,pointerId:92,pointerType,clientX:500,clientY:400,preventDefault(){}};
     canvas.events.pointerdown(down);
     canvas.events.pointermove({...down,clientX:down.clientX+dx,clientY:down.clientY+dy});
     assert.equal(game.element('angle').value,expected);
+    assert.equal(game.element('angle-value').textContent,expected+'°');
     canvas.events.pointerup({...down,clientX:down.clientX+dx,clientY:down.clientY+dy});
     assert.equal(game.element('status').textContent,'DISMOUNT IN PROGRESS');
     assert.equal(game.element('power-value').textContent,'100%');
@@ -712,22 +718,29 @@ test('replay supports pause, exact frame steps, scrubbing, peak jump, speed, and
   assert.equal(game.element('score-entry').hidden,true);
   game.click('reset');assert.equal(game.element('replay-controls').hidden,true);
 });
-test('retry preserves exact push power, and tweak changes only edited settings',()=>{
+test('retry and saved replay preserve quarter-degree angles and exact power, and tweak changes only edited settings',()=>{
   const values=new Map(),storage={getItem:k=>values.get(k)||null,setItem:(k,v)=>values.set(k,v)};
   const game=setup(undefined,storage);game.advance(.1);
   const down={button:0,pointerId:94,clientX:500,clientY:400,preventDefault(){}};
   game.element('game').events.pointerdown(down);
   game.element('game').events.pointerup({...down,clientX:630.3,clientY:362.3});game.advance(20);
   function save(nick){game.element('initials').value=nick;game.element('score-entry').events.submit({preventDefault(){}});return JSON.parse(values.get(require('../src/scores.js').KEY)).entries.find(e=>e.nick===nick);}
-  const original=save('AAA');game.click('retry');
+  const original=save('AAA');assert.equal(original.push.angle,16.25);game.click('retry');
   assert.equal(game.element('status').textContent,'DISMOUNT IN PROGRESS');game.advance(20);
   const exact=save('BBB');assert.deepEqual(exact.push,original.push);assert.equal(exact.score,original.score);
   game.click('retry-edit');assert.equal(game.element('retry-settings').hidden,false);
   game.click('preset-launch');game.advance(20);
   const unedited=save('CCC');assert.deepEqual(unedited.push,original.push);assert.equal(unedited.score,original.score);
   game.click('retry-edit');game.element('preset-power').value='42.5';game.element('preset-power').events.input();
-  game.element('angle').value='-10';game.element('part').value='leftFoot';game.click('preset-launch');game.advance(20);
-  const edited=save('DDD');assert.deepEqual(edited.push,{part:'leftFoot',angle:-10,power:.425});
+  game.element('angle').value='-10.25';game.element('angle').events.input();
+  assert.equal(game.element('angle-value').textContent,'-10.25°');
+  game.element('part').value='leftFoot';game.click('preset-launch');game.advance(20);
+  const edited=save('DDD');assert.deepEqual(edited.push,{part:'leftFoot',angle:-10.25,power:.425});
+  const reloaded=setup(undefined,storage),row=reloaded.element('score-rows').children.find(row=>row.children[1].textContent==='AAA');
+  const button=row.children[3].children[0];
+  reloaded.element('score-rows').events.click({target:{closest:()=>button}});reloaded.advance(23);
+  assert.equal(Number(reloaded.element('score').textContent),original.score);
+  reloaded.click('retry-edit');assert.equal(reloaded.element('angle').value,'16.25');
   game.element('layout').value='shaft';game.element('layout').events.change();
   assert.equal(game.element('retry').disabled,true);
 });

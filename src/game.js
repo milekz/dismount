@@ -1076,7 +1076,7 @@
     drag.distance = Math.hypot(dx, dy);
     if (drag.distance >= 10) drag.moved = true;
     if (!drag.moved) return;
-    const angle = Math.round(Math.max(-100, Math.min(100, Math.atan2(dy, dx) * 180 / Math.PI)));
+    const angle = Math.round(Math.max(-100, Math.min(100, Math.atan2(dy, dx) * 180 / Math.PI)) * 4) / 4;
     power = Math.min(1, drag.distance / drag.powerDistance);
     $('angle').value = String(angle); $('angle-value').textContent = angle + '°';
     $('power-fill').style.width = power * 100 + '%';

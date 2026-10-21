@@ -19,7 +19,7 @@ Then visit `http://localhost:8000`.
 Alternatively, use the power meter:
 
 1. Select a body part in the dropdown, or click it on the dummy. **Neck** targets the cervical segment directly for all five subjects. Both feet are available; foot pushes apply to the selected foot itself.
-2. Adjust the angle from −100° to 100°; 90° pushes vertically up and angles above 90° push slightly backward. Drag up and left to reach 100°, or down and left to reach −100°. Older saved replays retain their original angles.
+2. Adjust the angle from −100° to 100° in **0.25° steps**. Focus the angle slider and use the arrow keys for fine adjustments; mouse/touch aiming also snaps to quarter degrees. 90° pushes vertically up and angles above 90° push slightly backward. Drag up and left to reach 100°, or down and left to reach −100°. Older saved replays retain their original angles.
 3. Hold **Hold to charge** and release the mouse button at the desired power. Alternatively, use two short clicks: the first starts charging and the second pushes. Space also starts/releases when focus is outside a form control.
 4. Watch the damage report. Head impacts earn a larger multiplier.
 5. After a fall, click anywhere on the stage to try again. You can also reset with **R** or **Reset**; use **Replay** to watch the last completed experiment.
