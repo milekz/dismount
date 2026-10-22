@@ -33,7 +33,7 @@
   const motionEnabled=()=>motion&&layout!=='endless';
   let camera=null, renderDelta=0, impactSlow=0, impactCooldown=0, shake=0;
   const bestKey=()=>(layout==='classic'?'dismount-anatomy-best-v4':'dismount-anatomy-best-v4-'+layout)+(character==='human'?'':'-character-'+character);
-  let replayCache=null,ghostFrames=null,ghostEnabled=false,attemptCompleted=false,challenge='none';
+  let replayCache=null,ghostFrames=null,ghostEnabled=false,attemptCompleted=false,challenge='none',activeSharedUrl=null;
   const {themes}=window.DismountSubjects;
   const {goals,evaluate}=window.DismountChallenges;
   const theme=()=>themes[current.character||'human'];
@@ -42,9 +42,13 @@
   const dom=new Map();
   const $ = id => {if(!dom.has(id))dom.set(id,document.getElementById(id));return dom.get(id);};
   const badgeView=badgeTools.createView({host:window,document});let badgeEntry=null;
-  function setBadgeEntry(entry) {badgeEntry=entry;badgeView.decorate($('run-badge'),entry);}
+  function setBadgeEntry(entry) {
+    badgeEntry=entry;
+    for(const id of ['run-badge','result-badge'])badgeView.decorate($(id),entry);
+    $('result-badge-panel').hidden=!entry;
+  }
   setBadgeEntry(null);
-  $('run-badge').addEventListener('click',()=>{if(badgeEntry)badgeView.show(badgeEntry);});
+  for(const id of ['run-badge','result-badge'])$(id).addEventListener('click',()=>{if(badgeEntry)return badgeView.show(badgeEntry);});
   const chambers=Object.fromEntries(Object.keys(LAYOUTS).map(id=>[id,buildStair(id)]));
   let replayPaused=false,replaySpeed=1,peakFrame=0,retryRecipe=null,presetPower=0,reportClock=0;
   let noticeLife=0,milestoneLife=0;
@@ -488,18 +492,19 @@
     try {
       const url=new URL(window.location.href);
       if(url.hash.startsWith('#replay='))url.hash='';
+      url.searchParams.delete('replay');
       url.searchParams.set('chamber',layout);
       if(character==='human')url.searchParams.delete('character');
       else url.searchParams.set('character',character);
       window.history.replaceState(window.history.state,'',url.href);
     } catch (_) { /* Selection still works for restricted embeds and local files. */ }
   }
-  function changeChamber() {
+  function changeChamber({preserveReplayUrl=false}={}) {
     if(!['ready','finished'].includes(mode)||!Object.hasOwn(LAYOUTS,$('layout').value)||!Object.hasOwn(CHARACTERS,$('character').value)) {
       $('layout').value=layout;$('character').value=character;return;
     }
     bests.set(selectionKey(),best);layout=$('layout').value;character=$('character').value;setBadgeEntry(null);
-    updateChamberNumber();updateChamberUrl();sim=new Simulation(layout,character);frames=new Recording();ghostFrames=null;attemptCompleted=false;updateGhost();retryRecipe=null;
+    updateChamberNumber();if(!preserveReplayUrl)updateChamberUrl();sim=new Simulation(layout,character);frames=new Recording();ghostFrames=null;attemptCompleted=false;updateGhost();retryRecipe=null;
     const key=selectionKey();
     if(!boards.has(key))boards.set(key,new ScoreBoard(storage,REPLAY_VERSION,layout,character));
     board=boards.get(key);best=0;
@@ -563,6 +568,7 @@
     $('part').disabled=value;$('angle').disabled=value;$('layout').disabled=!['ready','finished'].includes(mode);$('character').disabled=$('layout').disabled;$('challenge').disabled=$('layout').disabled;renderBoard();
   }
   function reset() {
+    activeSharedUrl=null;
     depthRecords.save();clearMilestone();
     audioFx.clear();
     replayJob?.worker?.terminate();
@@ -717,9 +723,11 @@
     mode='finished';lock(true);$('launch').disabled=false;$('launch').innerHTML='New experiment <span>↗</span>';$('status').textContent='EXPERIMENT COMPLETE';$('replay').disabled=!frames.length;
     pendingScore=replaying?null:{push:{...runPush},score:current.score,hits:current.hits,time:current.time,steps:frames.length-1};
     if(!replaying)setBadgeEntry({...pendingScore,id:'last-run',nick:'RUN',savedAt:0,layout,character,engine:REPLAY_VERSION});
-    $('score-entry').hidden=replaying||!board.qualifies(current.score);
-    $('save-message').textContent='';
-    const record=!replaying&&current.score>best;
+    const firstAttempt=!replaying&&board.complete(pendingScore);
+    if(!firstAttempt)pendingScore=null;
+    $('score-entry').hidden=!firstAttempt||!board.qualifies(current.score);
+    $('save-message').textContent=!replaying&&!firstAttempt?'Settings already used — change your push to enter the top 10.':'';
+    const record=firstAttempt&&current.score>best;
     if(record){best=current.score;try{localStorage.setItem(bestKey(),String(best));}catch(_){}$('best').textContent=best.toLocaleString();}
     const description=replaying?null:resultDescription(record);
     $('result-outcome').textContent=replaying?'REPLAY COMPLETE':record?'NEW PERSONAL BEST':'EXPERIMENT COMPLETE';
@@ -767,6 +775,8 @@
   function startReplay(recording, label='', recipe=runPush,engine=REPLAY_VERSION) {
     clearMilestone();
     if(recipe) {
+      // Only reconstructed and validated QR replays reach this point.
+      board.rememberPush(recipe,engine);
       const end=recording.at(-1);
       const sameBadge=badgeEntry&&badgeEntry.layout===layout&&badgeEntry.character===character&&badgeEntry.engine===engine
         &&badgeEntry.score===end.score&&badgeEntry.steps===recording.length-1
@@ -935,6 +945,26 @@
     $('stage').setAttribute('data-finished','false');$('drop').disabled=true;
     $('launch').disabled=true;$('replay').disabled=true;
     $('status').textContent='PREPARING REPLAY';$('hint').textContent='REBUILDING RECORDED PHYSICS…';
+  }
+  function openSharedReplay(shared=badgeTools.readLink(window.location?.href)) {
+    if(!shared.entry) {
+      if(shared.error){$('board-message').textContent=shared.error;$('hint').textContent=shared.error;}
+      return false;
+    }
+    const href=window.location?.href;
+    if(activeSharedUrl===href)return true; // popstate and hashchange may describe the same navigation.
+    reset();
+    const entry=shared.entry;
+    if(layout!==entry.layout||character!==entry.character) {
+      $('layout').value=entry.layout;$('character').value=entry.character;
+      changeChamber({preserveReplayUrl:true});
+    }
+    for(const id of ['welcome','badge-dialog'])if($(id).open)$(id).close?.();
+    $('part').value=entry.push.part;$('angle').value=String(entry.push.angle);
+    $('angle-value').textContent=entry.push.angle+'°';
+    $('power-value').textContent=Number((entry.push.power*100).toFixed(2))+'%';
+    $('power-fill').style.width=entry.push.power*100+'%';
+    activeSharedUrl=href;loadReplay(entry);return true;
   }
   for(const id of ['score-rows','previous-score-rows'])$(id).addEventListener('click',replayScore);
   $('initials').addEventListener('input',()=>{$('initials').value=normalizeNick($('initials').value);});
@@ -1141,13 +1171,9 @@
   // Losing capture is not a cancellation: retain the gesture until global release.
   // Only pointercancel, reset, or leaving the window cancels an unfinished gesture.
   window.addEventListener('blur', () => { if (drag || launchPress) reset(); });
+  window.addEventListener('hashchange',()=>openSharedReplay());
+  window.addEventListener('popstate',()=>openSharedReplay());
   reset();resize();
-  if(sharedLink.entry) {
-    $('part').value=sharedLink.entry.push.part;$('angle').value=String(sharedLink.entry.push.angle);
-    $('angle-value').textContent=sharedLink.entry.push.angle+'°';loadReplay(sharedLink.entry);
-  } else {
-    if(sharedLink.error)$('board-message').textContent=sharedLink.error;
-    if(!linkedChamber&&!linkedCharacter)$('welcome').showModal?.();
-  }
+  if(!openSharedReplay(sharedLink)&&!sharedLink.error&&!linkedChamber&&!linkedCharacter)$('welcome').showModal?.();
   requestAnimationFrame(tick);
 })();

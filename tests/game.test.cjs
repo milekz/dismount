@@ -439,6 +439,40 @@ test('initials save once and leaderboard replay survives reload', () => {
   assert.equal(reloaded.element('replay').disabled,true);
 });
 
+test('used settings hide initials after unsaved retries and reloads, while cancelled runs remain eligible',()=>{
+  class ShortSimulation extends physics.Simulation {step(){super.step();if(this.time>.8)this.active=false;}}
+  const api={...physics,Simulation:ShortSimulation},values=new Map(),storage={getItem:k=>values.get(k)||null,setItem:(k,v)=>values.set(k,v)};
+  const game=setup(undefined,storage,true,undefined,undefined,api);
+  game.click('drop');game.advance(.2);game.click('reset');
+  game.click('drop');game.advance(1);
+  assert.equal(game.element('score-entry').hidden,false);
+  game.click('retry');game.advance(1);
+  assert.equal(game.element('result').hidden,false);assert.equal(game.element('result-badge-panel').hidden,false);
+  assert.equal(game.element('score-entry').hidden,true);assert.match(game.element('save-message').textContent,/Settings already used/);
+  game.element('initials').value='DUP';game.element('score-entry').events.submit({preventDefault(){}});
+  assert.equal(values.has(require('../src/scores.js').KEY),false);
+  const reload=setup(undefined,storage,true,undefined,undefined,api);
+  reload.click('drop');reload.advance(1);assert.equal(reload.element('score-entry').hidden,true);
+  reload.click('reset');reload.element('angle').value='15.25';reload.click('drop');reload.advance(1);
+  assert.equal(reload.element('score-entry').hidden,false);
+});
+
+test('a validated QR marks its setup as used before a manual retry without adding a high score',()=>{
+  class ShortSimulation extends physics.Simulation {step(){super.step();if(this.time>.8)this.active=false;}}
+  const api={...physics,Simulation:ShortSimulation},values=new Map(),storage={getItem:k=>values.get(k)||null,setItem:(k,v)=>values.set(k,v)};
+  const simulation=new ShortSimulation('classic'),push={part:'chest',angle:6.25,power:1};
+  simulation.push(push.part,push.angle,push.power);let steps=0;
+  while(simulation.active){simulation.step();steps++;}
+  const end=simulation.snapshot(),entry={id:'used-qr',nick:'QRS',savedAt:0,engine:physics.REPLAY_VERSION,layout:'classic',character:'human',
+    push,steps,score:end.score,hits:end.hits,time:end.time};
+  const game=setup(undefined,storage,true,undefined,require('../src/badges.js').link(entry),api);game.advance(2);
+  assert.equal(game.element('result-title').textContent,'Replay · QRS');
+  assert.equal(values.has(require('../src/scores.js').KEY),false);
+  game.click('retry');game.advance(1);
+  assert.equal(game.element('score-entry').hidden,true);assert.match(game.element('save-message').textContent,/Settings already used/);
+  assert.equal(game.element('result-badge-panel').hidden,false);
+});
+
 test('reset cancels saved replay preparation and unavailable versions cannot replay', () => {
   const {ScoreBoard,KEY}=require('../src/scores.js');
   const values=new Map(), storage={getItem:key=>values.get(key)||null,setItem:(key,value)=>values.set(key,value)};
@@ -683,19 +717,55 @@ test('shared badge URLs reconstruct exact current and historical runs without ad
     while(simulation.active&&steps<2165){simulation.step();steps++;}
     const end=simulation.snapshot(),entry={id:'share-test',savedAt:0,nick:'QRX',layout:'classic',character:'robot',engine,push,steps,score:end.score,hits:end.hits,time:end.time};
     const writes=[],storage={getItem:()=>null,setItem:(key,value)=>writes.push([key,value])};
-    const game=setup(undefined,storage,true,undefined,badges.link(entry));
+    const url=new URL(badges.link(entry));
+    if(engine==='rigid-3.0.0'){url.hash='replay='+url.searchParams.get('replay');url.searchParams.delete('replay');}
+    const game=setup(undefined,storage,true,undefined,url.href);
     assert.equal(game.element('status').textContent,'PREPARING REPLAY');
     assert.equal(game.element('character').value,'robot');
     assert.equal(game.element('angle-value').textContent,'6.25°');
+    for(let i=0;i<200&&game.element('status').textContent.startsWith('PREPARING');i++)game.advance(1/60);
+    assert.equal(game.element('status').textContent,'REPLAYING EXPERIMENT');
+    assert.equal(game.element('replay-toggle')['aria-pressed'],'true');
     game.advance(24);
     assert.equal(game.element('result-title').textContent,'Replay · QRX');
     assert.equal(Number(game.element('score').textContent),entry.score);
-    assert.equal(game.element('score-entry').hidden,true);assert.deepEqual(writes,[]);
+    assert.equal(game.element('score-entry').hidden,true);
+    assert.ok(writes.length>0);assert.ok(writes.every(([key])=>key.startsWith(require('../src/scores.js').USED_PREFIX)));
     assert.equal(game.element('run-badge').disabled,false);
     game.click('retry-edit');assert.equal(game.element('angle').value,'6.25');
     game.click('preset-launch');assert.equal(new URL(game.url()).hash,'');
+    assert.equal(new URL(game.url()).searchParams.has('replay'),false);
     assert.equal(game.element('run-badge').disabled,true);
   }
+});
+
+test('opening a QR in an existing tab closes dialogs, changes scenes and starts replay without another click',()=>{
+  const badges=require('../src/badges.js'),{Recording}=require('../src/replay.js');
+  const simulation=new physics.Simulation('shaft','skeleton'),recording=new Recording();recording.push(simulation.snapshot());
+  const push={part:'head',angle:15.25,power:.723456789};simulation.push(push.part,push.angle,push.power);
+  for(let i=0;i<120;i++){simulation.step();recording.push(simulation.snapshot());}
+  const end=recording.at(-1),entry={id:'incoming',savedAt:0,nick:'URL',layout:'shaft',character:'skeleton',engine:physics.REPLAY_VERSION,
+    push,steps:120,score:end.score,hits:end.hits,time:end.time};
+  const game=setup(),workers=[];
+  game.host.Worker=class {constructor(){workers.push(this);}postMessage(entry){this.entry=entry;}terminate(){this.terminated=true;}};
+  game.click('launch');game.advance(.2);
+  for(const id of ['welcome','badge-dialog']){const dialog=game.element(id);dialog.open=true;dialog.close=()=>{dialog.open=false;};}
+  const url=new URL(badges.link(entry));url.hash='replay='+url.searchParams.get('replay');url.searchParams.delete('replay');
+  game.host.location.href=url.href;game.windowEvents.hashchange();game.windowEvents.popstate();
+  assert.equal(workers.length,1);assert.equal(game.element('status').textContent,'PREPARING REPLAY');
+  assert.equal(game.element('layout').value,'shaft');assert.equal(game.element('character').value,'skeleton');
+  assert.equal(game.element('welcome').open,false);assert.equal(game.element('badge-dialog').open,false);
+  assert.equal(game.url(),url.href);assert.equal(game.element('angle-value').textContent,'15.25°');
+  const next={...entry,nick:'NXT'};game.host.location.href=badges.link(next);game.windowEvents.popstate();
+  assert.equal(workers.length,2);assert.equal(workers[0].terminated,true);
+  workers[0].onmessage({data:{recording:recording.packet()}});
+  assert.equal(game.element('status').textContent,'PREPARING REPLAY');
+  workers[1].onmessage({data:{recording:recording.packet()}});
+  assert.equal(game.element('status').textContent,'REPLAYING EXPERIMENT');
+  game.advance(.3);assert.ok(Number(game.element('replay-timeline').value)>0);
+  game.advance(1);assert.equal(game.element('result-title').textContent,'Replay · NXT');
+  game.click('reset');game.element('layout').value='classic';game.element('layout').events.change();
+  assert.equal(new URL(game.url()).searchParams.has('replay'),false);
 });
 
 test('shared links reject malformed recipes and mismatched results without awarding records',()=>{
@@ -712,27 +782,37 @@ test('shared links reject malformed recipes and mismatched results without award
   assert.equal(game.element('run-badge').disabled,true);assert.deepEqual(writes,[]);
 });
 
-test('completed and saved runs show clickable badges next to replay, with a download fallback',async()=>{
+test('completed and saved runs show synchronized clickable badges in the result and next to replay',async()=>{
   const values=new Map(),storage={getItem:k=>values.get(k)||null,setItem:(k,v)=>values.set(k,v)};
   const game=setup(undefined,storage);game.click('drop');game.advance(20);
   const badge=game.element('run-badge');assert.equal(badge.disabled,false);
   assert.equal(badge.children[0].src,'data:image/png;base64,test');
+  const resultBadge=game.element('result-badge');
+  assert.equal(game.element('result').hidden,false);assert.equal(game.element('result-badge-panel').hidden,false);
+  assert.equal(resultBadge.disabled,false);assert.deepEqual(resultBadge.children[0].alt,badge.children[0].alt);
   let opened=0;game.element('badge-dialog').showModal=()=>opened++;
-  await game.click('run-badge');
+  await game.click('result-badge');
+  game.element('stage').events.click({target:{closest:()=>resultBadge}});
+  assert.equal(game.element('result').hidden,false);assert.equal(game.element('status').textContent,'EXPERIMENT COMPLETE');
   assert.equal(opened,1);assert.match(game.element('badge-status').textContent,/Download the PNG/);
   const badges=require('../src/badges.js'),before=badges.readLink(game.element('badge-link').value).entry;
   assert.equal(before.nick,'RUN');assert.equal(before.push.power,0);
   assert.equal(game.element('badge-download').download,'dismount-RUN-'+before.score+'.png');
   game.element('initials').value='NEW';game.element('score-entry').events.submit({preventDefault(){}});
+  assert.match(resultBadge.children[0].alt,/NEW/);assert.equal(resultBadge.children[0].alt,badge.children[0].alt);
   const row=game.element('score-rows').children[0],savedBadge=row.children[3].children[1];
   assert.ok(savedBadge.getAttribute('data-badge-id'));
   game.click('replay');await game.click('run-badge');
   assert.equal(badges.readLink(game.element('badge-link').value).entry.nick,'NEW');
+  assert.equal(game.element('result').hidden,true);game.advance(20);
+  assert.equal(game.element('result').hidden,false);assert.equal(game.element('result-badge-panel').hidden,false);
+  await game.click('result-badge');assert.equal(badges.readLink(game.element('badge-link').value).entry.nick,'NEW');
   game.click('reset');
   game.element('score-rows').events.click({target:{closest:()=>savedBadge}});await Promise.resolve();
   assert.equal(badges.readLink(game.element('badge-link').value).entry.nick,'NEW');
   game.click('reset');assert.equal(badge.disabled,false);
   game.element('layout').value='shaft';game.element('layout').events.change();assert.equal(badge.disabled,true);
+  assert.equal(resultBadge.disabled,true);assert.equal(game.element('result-badge-panel').hidden,true);
 });
 
 test('additional chambers have separate boards and saved replays after reload',()=>{
@@ -788,10 +868,13 @@ test('retry and saved replay preserve quarter-degree angles and exact power, and
   function save(nick){game.element('initials').value=nick;game.element('score-entry').events.submit({preventDefault(){}});return JSON.parse(values.get(require('../src/scores.js').KEY)).entries.find(e=>e.nick===nick);}
   const original=save('AAA');assert.equal(original.push.angle,16.25);game.click('retry');
   assert.equal(game.element('status').textContent,'DISMOUNT IN PROGRESS');game.advance(20);
-  const exact=save('BBB');assert.deepEqual(exact.push,original.push);assert.equal(exact.score,original.score);
+  assert.equal(game.element('score-entry').hidden,true);assert.equal(save('BBB'),undefined);
+  assert.equal(Number(game.element('score').textContent),original.score);
+  assert.match(game.element('save-message').textContent,/Settings already used/);
   game.click('retry-edit');assert.equal(game.element('retry-settings').hidden,false);
   game.click('preset-launch');game.advance(20);
-  const unedited=save('CCC');assert.deepEqual(unedited.push,original.push);assert.equal(unedited.score,original.score);
+  assert.equal(game.element('score-entry').hidden,true);assert.equal(save('CCC'),undefined);
+  assert.equal(Number(game.element('score').textContent),original.score);
   game.click('retry-edit');game.element('preset-power').value='42.5';game.element('preset-power').events.input();
   game.element('angle').value='-10.25';game.element('angle').events.input();
   assert.equal(game.element('angle-value').textContent,'-10.25°');
@@ -1206,7 +1289,7 @@ test('saved replay worker is cancelled on reset, ignores stale replies and cache
 });
 
 test('previous records remain replayable in the archive without setting new personal bests',()=>{
-  const {PREVIOUS_KEY}=require('../src/scores.js');
+  const {PREVIOUS_KEY,USED_PREFIX}=require('../src/scores.js');
   for(const character of ['human','robot']) {
     const s=new physics.Simulation('classic',character,'rigid-2.3.0');s.push('chest',6,1);
     for(let i=0;i<120;i++)s.step();
@@ -1227,7 +1310,8 @@ test('previous records remain replayable in the archive without setting new pers
     assert.equal(Number(g.element('score').textContent.replace(/,/g,'')),entry.score);
     assert.equal(g.element('retry').disabled,true);
     assert.equal(g.element('best').textContent,'0');
-    assert.equal(values.size,1,'watching an archive must not write current records');
+    assert.deepEqual([...values.keys()].filter(k=>!k.startsWith(USED_PREFIX)),[key],'watching an archive must not write current records');
+    assert.deepEqual(JSON.parse(values.get(key)).entries,[entry]);
     g.click('stage-reset');g.element('character').value='knight';g.element('character').events.change();
     assert.equal(g.element('previous-scores').hidden,true);
   }

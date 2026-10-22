@@ -10,6 +10,7 @@ test('badge links round-trip exact recipes for every chamber and subject without
     assert.ok(restored);assert.deepEqual(restored.push,source.push);
     for(const key of ['nick','layout','character','engine','score','hits','time','steps'])assert.equal(restored[key],source[key]);
     assert.equal(new URL(url).searchParams.has('obsolete'),false);
+    assert.ok(new URL(url).searchParams.has('replay'));assert.equal(new URL(url).hash,'');
     assert.ok(url.length<300);
   }
 });
@@ -28,7 +29,8 @@ test('zero power, fine angles and historical replay versions stay exact',()=>{
 });
 
 test('malformed, oversized and unsupported links cannot start replay work',()=>{
-  const good=badges.link(entry());
+  const legacy=new URL(badges.link(entry()));legacy.hash='replay='+legacy.searchParams.get('replay');legacy.searchParams.delete('replay');
+  const good=legacy.href;
   for(const transform of [
     u=>u.replace('replay=1~','replay=2~'),u=>u.replace('rigid-3.1.0','rigid-99.0.0'),
     u=>u.replace('~neck~','~unknown~'),u=>u.replace('~-10.25~','~NaN~'),
@@ -40,11 +42,25 @@ test('malformed, oversized and unsupported links cannot start replay work',()=>{
   assert.deepEqual(badges.readLink('https://example.com/?chamber=1'),{});
   assert.deepEqual(badges.readLink(undefined),{});
   assert.throws(()=>badges.link(entry({score:-1})));
+  for(const payload of ['', '2~bad', 'x'.repeat(513)]) {
+    const url=new URL(badges.link(entry()));url.searchParams.set('replay',payload);
+    assert.ok(badges.readLink(url.href).error);
+  }
+});
+
+test('previous QR fragments and encoded scanner URLs still resolve to the same replay',()=>{
+  const url=new URL(badges.link(entry())),payload=url.searchParams.get('replay');
+  const expected=badges.readLink(url.href).entry;
+  url.searchParams.delete('replay');
+  for(const value of [payload,encodeURIComponent(payload).replaceAll('~','%7E')]) {
+    url.hash='replay='+value;assert.deepEqual(badges.readLink(url.href).entry,expected);
+  }
+  url.hash='replay=%ZZ';assert.ok(badges.readLink(url.href).error);
 });
 
 test('QR matrices are sized for the exact URL and have intact finder patterns',()=>{
   const cells=badges.matrix(badges.link(entry()));
-  assert.equal((cells.length-17)%4,0);assert.ok(cells.length<=69);
+  assert.equal((cells.length-17)%4,0);assert.ok(cells.length<=81);
   for(const [x,y] of [[0,0],[cells.length-7,0],[0,cells.length-7]]) {
     for(let r=0;r<7;r++)for(let c=0;c<7;c++)
       assert.equal(cells[y+r][x+c],r===0||r===6||c===0||c===6||(r>=2&&r<=4&&c>=2&&c<=4));

@@ -1,12 +1,12 @@
 const test=require('node:test');
 const assert=require('node:assert/strict');
-const {ScoreBoard,normalizeNick,KEY}=require('../src/scores.js');
+const {ScoreBoard,normalizeNick,KEY,USED_PREFIX}=require('../src/scores.js');
 const run=score=>({score,hits:5,time:2,steps:240,push:{part:'chest',angle:15,power:.73456789}});
 function memory(){const map=new Map();return {getItem:key=>map.get(key)||null,setItem:(key,value)=>map.set(key,value)};}
 
 test('top ten persist in descending order with exact replay inputs',()=>{
   const storage=memory(),board=new ScoreBoard(storage,'test');
-  for(let score=0;score<12;score++)assert.equal(board.save('ABC',run(score)).ok,true);
+  for(let score=0;score<12;score++)assert.equal(board.save('ABC',{...run(score),push:{...run(score).push,angle:score}}).ok,true);
   assert.deepEqual(board.entries.map(entry=>entry.score),[11,10,9,8,7,6,5,4,3,2]);
   assert.equal(board.qualifies(2),false);
   assert.equal(board.save('ABC',run(1)).ok,false);
@@ -34,6 +34,64 @@ test('denied storage preserves scores for the session and reports non-persistenc
   assert.equal(board.persistent,false);
   assert.equal(board.save('ABC',run(10)).persistent,false);
   assert.equal(board.entries.length,1);
+  assert.equal(board.complete(run(10)),false);
+});
+
+test('a completed setup can be saved once, and unsaved attempts stay used after reload',()=>{
+  const storage=memory(),board=new ScoreBoard(storage,'test'),first=run(10);
+  assert.equal(board.complete(first),true);
+  assert.equal(board.save('AB',first).ok,false);
+  assert.equal(board.complete(run(10)),false);
+  assert.equal(board.save('ABC',first).ok,true);
+  assert.equal(board.save('DEF',first).ok,false);
+  const unsaved={...run(20),push:{part:'neck',angle:6.25,power:1}};
+  assert.equal(board.complete(unsaved),true);
+  const reload=new ScoreBoard(storage,'test');
+  assert.equal(reload.complete({...unsaved}),false);
+  assert.equal(reload.save('XYZ',run(10)).ok,false);
+  assert.equal(reload.entries.length,1);
+});
+
+test('duplicate settings match badge precision and remain independent across scenes and physics',()=>{
+  const storage=memory(),board=new ScoreBoard(storage,'test');
+  assert.equal(board.complete(run(10)),true);
+  assert.equal(board.complete({...run(11),push:{...run(10).push,power:.7346}}),false);
+  for(const change of [{power:.7347},{angle:15.25},{part:'neck'}])
+    assert.equal(board.complete({...run(10),push:{...run(10).push,...change}}),true);
+  assert.equal(new ScoreBoard(storage,'test','steep').complete(run(10)),true);
+  assert.equal(new ScoreBoard(storage,'test','classic','robot').complete(run(10)),true);
+  assert.equal(new ScoreBoard(storage,'updated-physics').complete(run(10)),true);
+  assert.equal(board.entries.length,0);
+});
+
+test('used setups survive top-ten eviction and non-qualifying completions',()=>{
+  const storage=memory(),board=new ScoreBoard(storage,'test');
+  for(let angle=0;angle<12;angle++)board.save('ABC',{...run(angle),push:{...run(angle).push,angle}});
+  const low=run(0);assert.equal(board.qualifies(low.score),false);assert.equal(board.complete(low),true);
+  const reload=new ScoreBoard(storage,'test');
+  assert.equal(reload.complete({...run(0),push:{...run(0).push,angle:0}}),false);
+  assert.equal(reload.complete(low),false);
+});
+
+test('existing records seed history and already open boards see other tabs completed setups',()=>{
+  const storage=memory(),source=new ScoreBoard(storage,'test');source.save('OLD',run(10));
+  const legacy=memory();legacy.setItem(KEY,storage.getItem(KEY));
+  const migrated=new ScoreBoard(legacy,'test');assert.equal(migrated.complete(run(10)),false);
+  legacy.setItem(KEY,'');assert.equal(new ScoreBoard(legacy,'test').complete(run(10)),false);
+  const tabA=new ScoreBoard(storage,'test'),tabB=new ScoreBoard(storage,'test');
+  const fresh={...run(20),push:{part:'head',angle:0,power:1}};
+  assert.equal(tabA.complete(fresh),true);assert.equal(tabB.complete({...fresh}),false);
+});
+
+test('invalid attempts do not consume settings and seen replay recipes do',()=>{
+  const storage=memory(),board=new ScoreBoard(storage,'test');
+  assert.equal(board.complete({...run(10),steps:0}),false);
+  assert.equal(storage.getItem(board.pushKey(run(10).push)),null);
+  assert.equal(board.rememberPush({part:'fake',angle:0,power:1}),false);
+  assert.equal(board.rememberPush(run(10).push),true);
+  assert.equal(board.complete(run(10)),false);
+  assert.ok(board.pushKey(run(10).push).startsWith(USED_PREFIX));
+  assert.equal(board.entries.length,0);
 });
 
 test('each layout persists separately and old classic recipes still load',()=>{

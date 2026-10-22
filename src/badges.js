@@ -16,17 +16,20 @@
     url.searchParams.set('chamber',entry.layout||'classic');
     if(entry.character&&entry.character!=='human')url.searchParams.set('character',entry.character);
     // Number.toString round-trips doubles, including unrounded mouse power.
-    url.hash='replay='+[1,entry.engine,entry.push.part,entry.push.angle,entry.push.power,
-      entry.steps,entry.score,entry.hits,entry.time,entry.nick].join('~');
+    url.searchParams.set('replay',[1,entry.engine,entry.push.part,entry.push.angle,entry.push.power,
+      entry.steps,entry.score,entry.hits,entry.time,entry.nick].join('~'));
     return url.href;
   }
   function readLink(href) {
     if(!href)return {};
     try {
       const url=new URL(href);
-      if(!url.hash.startsWith('#replay='))return {};
-      if(url.hash.length>512)throw Error('Invalid replay link.');
-      const fields=url.hash.slice(8).split('~');
+      let payload=url.searchParams.get('replay');
+      // Keep already-shared QR codes working, including percent-encoded fragments.
+      if(payload===null&&url.hash.startsWith('#replay='))payload=decodeURIComponent(url.hash.slice(8));
+      if(payload===null)return {};
+      if(payload.length>512)throw Error('Invalid replay link.');
+      const fields=payload.split('~');
       if(fields.length!==10||fields[0]!=='1')throw Error('This replay link format is not supported.');
       const [,engine,part,angle,power,steps,score,hits,time,nick]=fields;
       for(const value of [angle,power,steps,score,hits,time])

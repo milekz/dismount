@@ -40,10 +40,20 @@
         <div id="endless-milestone" class="endless-milestone" role="status" aria-live="polite" hidden><strong id="endless-milestone-title"></strong><span id="endless-milestone-joke"></span></div>
         <canvas id="game" aria-label="Ragdoll in a test chamber. Select push settings and press Dismount."></canvas>
         <div class="scene-label"><span id="layout-caption">ENDLESS STAIRS · 120 s MAX</span> <span>·</span> 9.81 m/s² <span>·</span> ZERO REGRETS</div>
-        <div id="result" class="result" hidden><p id="result-outcome">EXPERIMENT COMPLETE</p><h2 id="result-title">A solid landing.</h2><p id="result-quip" class="result-quip"></p><p id="result-detail"></p><p id="result-score-breakdown"></p><form id="score-entry" hidden>
-          <label for="initials">TOP 10 — ENTER YOUR INITIALS</label>
-          <div class="initials-row"><input id="initials" name="initials" type="text" maxlength="3" minlength="3" pattern="[A-Za-z]{3}" autocomplete="off" autocapitalize="characters" spellcheck="false" required placeholder="AAA" aria-label="Three-letter initials"><button id="save-score" type="submit">Save score</button></div>
-        </form><p id="save-message" role="status"></p><button id="again">Try another push ↗</button><p>OR CLICK ANYWHERE ON THE STAGE</p></div>
+        <div id="result" class="result" hidden>
+          <div class="result-summary">
+            <p id="result-outcome">EXPERIMENT COMPLETE</p><h2 id="result-title">A solid landing.</h2>
+            <p id="result-quip" class="result-quip"></p><p id="result-detail"></p><p id="result-score-breakdown"></p>
+          </div>
+          <div class="result-actions">
+            <form id="score-entry" hidden>
+              <label for="initials">TOP 10 — ENTER YOUR INITIALS</label>
+              <div class="initials-row"><input id="initials" name="initials" type="text" maxlength="3" minlength="3" pattern="[A-Za-z]{3}" autocomplete="off" autocapitalize="characters" spellcheck="false" required placeholder="AAA" aria-label="Three-letter initials"><button id="save-score" type="submit">Save score</button></div>
+            </form>
+            <p id="save-message" role="status"></p><button id="again">Try another push ↗</button><p>OR CLICK ANYWHERE ON THE STAGE</p>
+          </div>
+          <div id="result-badge-panel" hidden><button id="result-badge" class="run-badge" type="button" disabled>▧ Badge</button><p class="help">Click your badge to copy · scan QR to replay</p></div>
+        </div>
         <div class="arena-bottom"><span id="hint">SET YOUR PUSH. LET PHYSICS DO THE REST.</span><div class="view-buttons" role="group" aria-label="Game display and sound controls"><button id="settings-toggle" class="small-button" aria-expanded="false" aria-controls="settings-drawer" hidden>SETTINGS</button><button id="ghost" class="small-button" aria-pressed="false" disabled>GHOST OFF</button><button id="fullscreen" class="small-button" aria-pressed="false">FULLSCREEN</button><button id="stage-sound" class="small-button" aria-pressed="true">SOUND ON</button><button id="view" class="small-button">VIEW: PERSPECTIVE</button><button id="injury-rings" class="small-button" aria-pressed="false" title="Show or hide injury and impact circles on the character">INJURY RINGS OFF</button><button id="injury-labels" class="small-button" aria-pressed="true" title="Show or hide injury descriptions on the stage">INJURY TEXT ON</button><button id="motion" class="small-button" aria-pressed="false">MOTION FX OFF</button><button id="physics-view" class="small-button" type="button" aria-pressed="false" aria-controls="physics-legend" title="Show center of mass, velocity and contact forces">PHYSICS OFF</button><button id="slow" class="small-button" aria-pressed="false">½ SPEED</button></div></div>
       </section>
       <div id="physics-legend" class="physics-legend" hidden><span>⊕ Center of mass</span><span>→ Velocity · m/s</span><span>→ Contact force · N</span><small>Contacts combined per body part · max 4 arrows · forces averaged per frame · arrow lengths capped</small></div>
